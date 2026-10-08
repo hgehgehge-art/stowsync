@@ -1,0 +1,77 @@
+# ─────────────────────────────────────────────────────────────
+# StowSync 데모 파라미터
+# 이 파일의 모든 숫자는 '가정'입니다. 실측치가 아니며 화면에도 그렇게 표기합니다.
+# 보정 계획: 부산항 컨테이너 수송통계 · 입항선박 톤급별 통계(공공데이터포털)
+# ─────────────────────────────────────────────────────────────
+
+seed: 42                     # 가정: 데모 고정 시드 (같은 시드 → 같은 결과)
+base_date: "2026-10-08"      # 가정: 데모상의 '오늘'
+
+yard:
+  rows_per_bay: 6            # 가정: 베이당 로우(스택) 수
+  max_tiers: 5               # 가정: 최대 장치 단 수
+  slack: 1.35                # 가정: 블록 여유 용량 배수 (박스 수 × slack 만큼 슬롯 확보)
+  block_names: [A1, A2, B1]  # 가정: 선박별 전용 블록 이름
+
+vessels:
+  names: [MV HANA, MV BADA, MV NURI]   # 가정: 가상 선박명
+  boxes: [160, 130, 110]               # 가정: 선박별 이번 항차 수출 박스 수 (톤급별 통계로 보정 예정)
+  eta_hours: [7, 14, 21]               # 가정: 오늘 입항 시각(시)
+  stay_hours: [16, 14, 12]             # 가정: 재항 시간(시간)
+  cutoff_before_eta: 10                # 가정: 반입 마감 = 입항 n시간 전
+  pod_count: [3, 5]                    # 가정: 양하항 수 범위 (최소, 최대)
+
+ports: [CNSHA, CNNGB, JPTYO, JPOSA, SGSIN, VNSGN, THLCH, HKHKG, TWKHH, USLAX, NLRTM, DEHAM]  # 가정: 양하항 후보
+
+containers:
+  ratio_20ft: 0.45           # 가정: 20ft 비율 (부산항 컨테이너 수송통계로 보정 예정)
+  dg_ratio: 0.04             # 가정: 위험물 비율
+  weight_20: [14.0, 5.0]     # 가정: 20ft 총중량 평균·표준편차(t)
+  weight_40: [18.0, 6.0]     # 가정: 40ft 총중량 평균·표준편차(t)
+  weight_clip: [2.0, 30.0]   # 가정: 중량 하한·상한(t)
+  declared_error_std: 0.6    # 가정: 일반 박스의 신고중량-VGM 오차 표준편차(t)
+  weight_fix_error: [5.0, 9.0]  # 가정: VGM 수정 이벤트 박스의 신고 오차 범위(t)
+  arrival_days: 4            # 가정: 반입 기간(마감 전 n일)
+  arrival_beta: [1.3, 3.0]   # 가정: 마감 전 시간 ~ Beta(a,b) → 마감 직전에 몰림
+  owner_codes: [SKLU, HDMU, KMTU, PCIU, HMMU]  # 가정: 컨테이너 소유자 코드
+
+load_rule:                   # 가정: 실제 적재 순서 = 먼 양하항 먼저, 무거운 박스 먼저 + 잡음
+  pod: 1.0
+  weight: 0.35
+  dg: 0.08
+  size40: 0.04
+  noise: 0.10
+
+history:
+  voyages: 30                # 가정: 예측 학습용 과거 항차 수
+  boxes: [100, 180]          # 가정: 과거 항차당 박스 수 범위
+
+predictor:
+  gmm_components: 3          # 가정: 중량 그룹 수 (Park et al. 2023 참고: 3~4)
+  k_neighbors: 25            # 가정: 사례기반 추론 이웃 수
+  feature_weights:           # 가정: 가중 거리 Σ wᵢ·|xᵢ − xᵢ'| 의 가중치
+    pod: 4.0
+    weight_group: 1.0
+    weight: 1.0
+    size40: 0.3
+    dg: 0.5
+
+events:
+  change_ratio: 0.10         # 가정: 계획 변경 영향 박스 비율
+  shares:                    # 가정: 변경 유형별 비중
+    rollover: 0.4
+    add: 0.2
+    weight_fix: 0.4
+  window_hours: [3, 24]      # 가정: 이벤트 발생 시점 = 마감 전 n시간 범위
+
+strategy:
+  weight_groups: [10.0, 20.0]  # 가정: 현행 방식의 신고중량 그룹 경계(t) — Kim et al. 2000
+  current_by_pod: true         # 가정: 현행도 같은 양하항끼리 모아 장치
+  premarshal_budget: 25        # 가정: 방식 B의 선박당 유휴시간 사전 재정렬 예산(회)
+
+ops:
+  minutes_per_relocation: 2.5  # 가정: 재조작 1회당 크레인 지연(분)
+
+simulation:
+  default_reps: 10           # 가정: 실험실 기본 반복 수
+  dashboard_seeds: 12        # 가정: 대시보드 스파크라인용 시드 수
