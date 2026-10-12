@@ -1,17 +1,17 @@
 [theme]
 base = "dark"
-primaryColor = "#00D4FF"
-backgroundColor = "#0A1628"
-secondaryBackgroundColor = "#111F38"
-textColor = "#E6EDF7"
+primaryColor = "#59E0CE"
+backgroundColor = "#09121F"
+secondaryBackgroundColor = "#111E30"
+textColor = "#E6EDF5"
 font = "sans serif"
-
-[client]
-toolbarMode = "minimal"
-showErrorDetails = true
 
 [server]
 headless = true
+fileWatcherType = "none"
 
 [browser]
 gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"

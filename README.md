@@ -1,97 +1,64 @@
-# StowSync — 해운 관제실 데모 (Streamlit)
+# StowSync · 수출 컨테이너 통합 관제
 
-수출 컨테이너가 반입되는 순간 예상 선적 순서를 예측해 야드 장치 위치를 추천하고,
-선사·터미널·야드가 같은 계획을 보게 해 **재조작(리핸들링)** 을 줄이는 플랫폼의 데모입니다.
-명세: [SPEC.md](SPEC.md)
+기획서 시연과 캡처를 위한 Streamlit 데모입니다. 올컨e·Port-i·TOS는 **모의 데이터로만 표현**되며, 실제 시스템 또는 GPS에 연결되지 않습니다.
 
-> 모든 숫자는 `config/params.yaml` 의 **가정값으로 만든 시드 고정 합성 데이터**입니다. 실측치가 아닙니다.
-> 외부 API 키 없이 오프라인으로 동작합니다 (웹폰트만 CDN, 실패 시 시스템 폰트로 대체).
+## 실행
 
-## 실행 방법
+Python 3.12 권장. 프로젝트 폴더에서 실행합니다.
 
-```bash
-cd stowsync
-python3 -m venv .venv && source .venv/bin/activate   # 선택
-pip install -r requirements.txt
-streamlit run app.py
+```sh
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m streamlit run app.py
 ```
 
-브라우저에서 http://localhost:8501 이 열립니다. 테스트:
+## Streamlit Community Cloud 배포
 
-```bash
-python3 -m pytest -q
+이 폴더의 내용을 GitHub 저장소 루트에 넣습니다. `app.py`, `requirements.txt`, `.streamlit/config.toml` 및 각 Python 패키지 폴더를 함께 올립니다. `.venv`와 비밀정보는 제외합니다.
+
+[Streamlit Community Cloud](https://share.streamlit.io/)에서 Create app을 선택하고 저장소, 브랜치, `app.py`를 지정합니다. Python 3.12를 선택합니다. 서버·데이터베이스·API 키는 필요 없습니다.
+
+## 2분 시연
+
+1. **통합 관제**: 도착 정보·야드 적층·검토 대기 상태를 확인합니다.
+2. **배치 대안 검토**: Top 3 후보와 3D 추천 위치, 적층 단면을 확인합니다.
+3. **선택한 배치 모의 승인**: 승인 이후 변경·승인 화면으로 이동합니다.
+4. **현재 작업 완료까지 진행**: 작업 완료와 이동 이력을 확인합니다.
+5. **효과 분석**: 동일 조건의 3개 자동 정책 결과를 비교합니다. 수동 시연 결과와 자동 비교 결과는 별도입니다.
+
+## 기획서 캡처
+
+좌측 캡처 모드는 조작 안내를 줄이며 합성 데이터 고지는 유지합니다. 추천 캡처는 통합 관제, CY 배치 추천, 변경·승인, 효과 분석입니다. 그림 설명에 ‘합성 데이터 기반 프로토타입’이라고 표기하세요.
+
+## 구현과 제한
+
+- 네이비·청록색 대시보드, 회전 가능한 3D 야드, 2D 적층 단면, ETA 구간 차트
+- 모의 승인·보류·실행 완료 및 중복 승인 방지
+- 2개 블록 / 48슬롯 / 20ft 일반 드라이 / 가상 크레인 2대
+- 비선점 작업의 시작·완료를 처리하는 사건 시뮬레이터
+- 3개 비교 정책이 같은 초기 상태, 도착 사건, 계획 변경을 사용
+- 추가 이동에 선작업과 재취급을 모두 포함하며 미완료·악화도 표시
+- 후보 점수는 제한된 미래 시나리오 평가이며 전역 최적해가 아님
+- ETA는 생성한 예측값이며 실제로 학습한 현장 모델이 아님
+- 위치·안전 제약은 시연용 단순 모델이며 실제 장비 제어에 사용 불가
+- 데이터 다운로드는 합성 입력·설정·계산 로그만 포함
+
+## 검증
+
+```sh
+python -m pip install pytest
+python -m pytest tests -q
 ```
 
-- Python 3.11 이상 (3.13.5에서 확인), Streamlit 1.45 이상
-- 반드시 `stowsync/` 폴더에서 실행하세요 (`.streamlit/config.toml` 다크 테마가 적용됩니다)
+물리 제약, 동일 사건 비교, 추가 이동 집계, 중복·만료 승인, 전체 화면 및 승인 흐름을 검증합니다.
 
-## 3분 데모 순서
+## 화면과 이전 버전
 
-| # | 페이지 | 보여줄 것 |
-|---|---|---|
-| 1 | 관제 대시보드 | 선박 3척 스케줄, KPI 4개(현행 대비 ▼%), 블록×베이 위험 히트맵, 이벤트 피드 |
-| 2 | 야드 3D 뷰 | 현행 ↔ StowSync 나란히, 빨간 박스 = 재조작 대상, 마우스를 올리면 상세 정보 |
-| 3 | 선적위치 예측 | 🎲 랜덤 반입 → 예측 백분위·확률 막대 → 추천 슬롯 Top 3 → "이 슬롯에 장치" (3D 뷰에 흰색 박스로 표시) |
-| 4 | 계획 동기화 | ⛔ 롤오버 발생 → 박스 깜빡임, 역할별 알림 3개, 확인 대기 버전, 사전 재정렬 승인/거절, 로드시트 |
-| 5 | 시뮬레이션 실험실 | 현행 vs A vs B 평균·95% 구간, 박스플롯, CSV 다운로드, BRLP 탭 |
+현재 데모는 통합 관제, 트럭 ETA, CY 배치 추천, 변경·승인, 효과 분석, 데이터 연계의 6개 화면으로 구성됩니다. VBS 기존 기능과 공개 매뉴얼의 확인 범위는 데이터 연계 화면에서 구분해 설명합니다.
 
-## 화면 스크린샷
+기획서용 화면은 [docs/screenshots](docs/screenshots)에 있습니다. 캡처의 수치는 합성 데이터 결과입니다. 이전 구현은 [legacy/v1](legacy/v1)에 보존했습니다.
 
-`docs/screenshots/` 폴더에 있습니다. 개발 중에 찍은 화면이며, 제안서에 넣기 전에 최종 화면으로 다시 찍는 것을 권장합니다.
+![통합 관제](docs/screenshots/dashboard.png)
 
-| 파일 | 화면 |
-|---|---|
-| `docs/screenshots/1_dashboard.jpg` | 관제 대시보드 |
-| `docs/screenshots/2_yard3d.jpg` | 야드 3D 뷰 비교 모드 (테마 CSS 적용 전 캡처) |
-| `docs/screenshots/4_sync.jpg` | 계획 동기화 (이벤트 직후, 확인 대기 상태) |
-| `docs/screenshots/5_lab.jpg` | 시뮬레이션 실험실 |
-
-## 결과 요약 (기본 가정값, 시드 1000~1009, 3척 합계)
-
-| 전략 | 평균 재조작 | 현행 대비 |
-|---|---|---|
-| 현행 (중량 그룹 장치, Kim et al. 2000) | 274.0회 | — |
-| A · 예측 공유 | 123.7회 | −55% |
-| B · A + 실시간 변경 | 113.9회 (+ 사전 재정렬 5.8회 별도) | −58% (총 이동 기준 −56%) |
-
-- B와 A의 차이는 계획 변경 비율이 커질수록 벌어집니다 (변경 0%면 동일, 25%면 A 148.6회 vs B 128.9회).
-- 숫자는 조정하지 않았습니다. 결과가 나빠지는 설정에서는 실험실에 경고가 표시됩니다.
-
-## 구조
-
-```text
-app.py                  st.navigation, 테마 주입, 사이드바
-config/params.yaml      모든 가정값 ('가정' 주석)
-core/generator.py       합성 선박·컨테이너·반입 스트림, 과거 항차 이력
-core/events.py          롤오버 / 막판 부킹 / VGM 수정 (시나리오 + 동기화 보드 버튼)
-core/predictor.py       GMM 중량 그룹 + 사례기반(FASTrak 방식) 선적순서 예측
-core/stacking.py        장치 전략 현행 / A / B, 사전 재정렬
-core/relocation.py      재조작 횟수 계산 (tests/test_relocation.py)
-core/simulation.py      같은 데이터로 3전략 실행
-core/brlp_loader.py     BRLP .pro 파서와 평가
-ui/components.py        히어로 헤더, KPI 카드, 배지, Plotly 템플릿
-ui/yard_viz.py          Mesh3d 야드 3D, 베이 단면
-ui/state.py             캐시·세션 상태·사이드바
-pages/1~7               페이지
-```
-
-## 주요 가정과 단순화
-
-- 선박마다 전용 블록 1개, 슬롯 1개에 박스 1개 (20/40ft 물리적 차이는 무시하고 길이만 다르게 그림)
-- 선적 시 재조작: 같은 베이 안에서 옮김 (SPEC 5.4). 방식 B의 사전 재정렬은 같은 베이를 우선하고 없으면 같은 블록 안에서 옮김
-- 크레인 대기 = 재조작 1회당 2.5분 (가정)
-- 실제 적재 순서 = 먼 양하항 먼저, 무거운 박스 먼저 + 잡음 (VGM 기준)
-
-## BRLP 벤치마크
-
-`data/brlp/README.md` 를 참고해 `data.zip` 을 직접 내려받아 `data/brlp/` 에 두면 실험실의 BRLP 탭에서 자동으로 읽습니다.
-지금 들어 있는 `SAMPLE_selfmade_format_example.pro` 는 **자체 작성한 형식 예시**이며, 파서는 데이터셋 페이지 설명을 기준으로 작성했습니다.
-실제 파일로 형식을 다시 확인해야 합니다.
-
-## 남은 일
-
-- [ ] 시뮬레이션 실험실 결과를 캡처해 공모전 제안서 근거로 삽입
-- [ ] params.yaml 가정값을 공공데이터포털 통계로 보정
-- [ ] BRLP 실제 파일로 파서 형식 확인
-- [ ] Park et al. 2023, FASTrak 서지 정보 확인 (데이터 출처 페이지)
-- [ ] 데모 영상 녹화 (3분)
+![배치 추천](docs/screenshots/recommendation.png)
