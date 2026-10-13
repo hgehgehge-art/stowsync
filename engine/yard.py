@@ -24,12 +24,21 @@ def duration(config,source,target):
     a,b=xy(source),xy(target)
     return config.handling+15*abs(a[0]-b[0])+10*abs(a[1]-b[1])
 
+def cargo_allowed(containers, cid, key, items):
+    """Illustrative dedicated DG lane, not an IMDG segregation implementation."""
+    c=containers[cid]
+    dg_lane=key.endswith('-02-03')
+    if c.cargo_type=='위험물':
+        return dg_lane and all(containers[x].cargo_type=='위험물' and containers[x].hazard_class==c.hazard_class for x in items)
+    return not dg_lane and all(containers[x].cargo_type!='위험물' for x in items)
+
 def feasible(o: Observation,cid,source=None,ignore_headroom=False):
     c=o.containers[cid]
     result=[]
     for key,items in o.yard.items():
         if not key.startswith(c.block) or key==source or key in o.locked_stacks: continue
         if len(items)>=4 or sum(o.containers[x].weight_t for x in items)+c.weight_t>o.config.stack_weight_limit: continue
+        if not cargo_allowed(o.containers,cid,key,items):continue
         reservation=o.headroom.get(key)
         if not ignore_headroom and reservation and reservation['until']>o.now and reservation['plan_version']==o.plan_version and reservation['container_id']!=cid: continue
         # Unknown priorities are accepted only into empty stacks; no invented order.

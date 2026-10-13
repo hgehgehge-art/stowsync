@@ -6,8 +6,8 @@ from domain.models import Config, Container, Forecast, PlanEntry, Event, Scenari
 def build_scenario(config: Config, seed=None) -> ScenarioBundle:
     cfg = config.model_copy(update={"seed": config.seed if seed is None else seed})
     rng = random.Random(cfg.seed)
-    occupancy = .9 if cfg.preset == "capacity" else cfg.occupancy
-    initial_count = min(cfg.target_count - 4, round(48 * occupancy))
+    occupancy = .78 if cfg.preset == "capacity" else cfg.occupancy
+    initial_count = min(cfg.target_count - 4, 40, round(48 * occupancy))
     containers, yard, plan, forecasts, events = {}, {k: [] for k in stack_keys()}, {}, [], []
     n = cfg.target_count
     for i in range(n):
@@ -17,15 +17,17 @@ def build_scenario(config: Config, seed=None) -> ScenarioBundle:
         # Initial inventory deliberately includes inverted stacks, never invalid tiers.
         arrival = max(0, int(1000 + (i-initial_count) * 105 + rng.gauss(0, 320)))
         if rng.random() < cfg.concentration: arrival = max(120, int(2100 + rng.gauss(0, 250)))
+        if cfg.preset=='premarshal_demo':arrival+=3600
         booking = arrival + rng.choice([-1400, -700, 0, 700, 1400])
         if cfg.preset == "normal": booking = arrival
         if cfg.preset.startswith("early"): booking = arrival + 1500
         if cfg.preset.startswith("late"): booking = arrival - 1500
         if cfg.preset == "surprise" and i == initial_count: arrival, booking = 35, 1600
         if cfg.preset == "cutoff" and i >= n-5: arrival = 11000 + (i-n+5)*90
-        containers[cid] = Container(cid, "OCEAN HARMONY", block, max(0, booking-300), max(600, booking+300), round(rng.uniform(12, 25), 1), initial)
+        cargo='위험물' if i==initial_count+1 else '환적' if i==initial_count+2 else '일반'
+        containers[cid] = Container(cid, "OCEAN HARMONY", block, max(0, booking-300), max(600, booking+300), round(rng.uniform(12, 25), 1), initial, cargo_type=cargo, hazard_class='3 · 모의' if cargo=='위험물' else '', connecting_vessel='PACIFIC LINK' if cargo=='환적' else '')
         if initial:
-            choices = [k for k in yard if k.startswith(block) and len(yard[k]) < 4 and sum(containers[x].weight_t for x in yard[k]) + containers[cid].weight_t <= cfg.stack_weight_limit]
+            choices = [k for k in yard if k.startswith(block) and not k.endswith('-02-03') and len(yard[k]) < 4 and sum(containers[x].weight_t for x in yard[k]) + containers[cid].weight_t <= cfg.stack_weight_limit]
             if not choices:
                 raise ValueError("initial_yard: 초기 점유율과 스택 하중 한도를 동시에 만족할 수 없습니다.")
             # Packed initial stacks create meaningful blocking examples.
@@ -39,7 +41,7 @@ def build_scenario(config: Config, seed=None) -> ScenarioBundle:
                 if cfg.preset == "surprise" and i == initial_count: bias = 1800
                 mid = max(observed, int(arrival + bias))
                 width = max(120, int(err_scale*.7))
-                f = Forecast(f"ETA-{cid}-{observed}", observed, cid, max(observed, mid-width), mid, mid+width)
+                f = Forecast(f"ETA-{cid}-{observed}", observed, cid, max(observed, mid-width), mid, mid+width, trust_score=45 if cfg.preset=='uncertain' else 80)
                 forecasts.append(f)
         due = 1800 + i * 110
         if i >= initial_count: due = max(due, arrival + 900)
@@ -57,7 +59,7 @@ def build_scenario(config: Config, seed=None) -> ScenarioBundle:
         ordered = ordered[:12] + future
         changed = {cid: asdict(PlanEntry(cid,j+1,max(2400,2700+j*90),1+j//20)) for j,cid in enumerate(ordered)}
         events.append(Event(2100,"PLAN_UPDATE","PLAN-P2",{"version":"P2","entries":changed}))
-    vessels = {"OCEAN HARMONY": {"gate_open": 0, "gate_cutoff": 10800}}
+    vessels = {"OCEAN HARMONY": {"gate_open": 0, "gate_cutoff": 10800, "eta": 1800, "terminal": "T01"}}
     return ScenarioBundle(cfg, containers, yard, plan, forecasts, events, vessels)
 
 def validate_bundle(bundle: ScenarioBundle) -> ValidationReport:

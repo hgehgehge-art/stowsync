@@ -22,6 +22,7 @@ class Simulator:
         self.moves=[];self.decisions=[];self.events=[];self.retrievals=[];self.snapshots=[]
         self.headroom={};self.last_premarshal={};self.idle_used=set();self.accepted={}
         self.manual=False;self.manual_initial=False;self.queue=[];self.serial=0
+        self.cargo_checks=set();self.eta_overrides=set()
         self.run_id=f'{policy}-{stable_hash([bundle.config.model_dump(),bundle.truth_events,bundle.initial_yard])}'
         self.termination='RUNNING'
         for e in bundle.truth_events:self.push(e.at,e.kind,deepcopy(e.payload),e.event_id)
@@ -53,7 +54,7 @@ class Simulator:
         cid=p.get('container_id','')
         if kind=='FORECAST_UPDATE':
             f=p['forecast']
-            if self.statuses[f.container_id]=='EN_ROUTE':self.forecasts[f.container_id]=f
+            if self.statuses[f.container_id]=='EN_ROUTE' and f.container_id not in self.eta_overrides:self.forecasts[f.container_id]=f
         elif kind=='PLAN_UPDATE':
             new={x:PlanEntry(**entry) for x,entry in p['entries'].items()}
             for x,old in self.plan.items():
@@ -206,6 +207,7 @@ class Simulator:
         if self.cranes[b]:errors.append('RESOURCE_BUSY · 크레인 작업 중')
         if candidate.stack not in feasible(self.observe(),cid,src[0] if src else None):errors.append('NO_FEASIBLE_SLOT · 슬롯 제약 위반')
         if rec.action=='INITIAL' and cid not in self.yard_arrivals:errors.append('NOT_ARRIVED · CY 도착 후 승인할 수 있습니다.')
+        if self.bundle.containers[cid].cargo_type!='일반' and cid not in self.cargo_checks:errors.append('CARGO_REVIEW · 특수화물 검토 확인이 필요합니다.')
         if rec.action=='PREMARSH':
             allowed=propose_premarshal(self.observe(),b)
             if not allowed or allowed.container_id!=cid or candidate.stack not in [c.stack for c in allowed.candidates]:errors.append('NO_SAFE_GAIN · 필수 작업·여유시간·개선 조건 미충족')
@@ -213,7 +215,7 @@ class Simulator:
 
     def approve(self,rec,index=0):
         if rec.recommendation_id in self.accepted:return ValidationReport()
-        if index>=len(rec.candidates):return ValidationReport(['NO_FEASIBLE_SLOT'])
+        if not 0<=index<len(rec.candidates):return ValidationReport(['NO_FEASIBLE_SLOT'])
         c=rec.candidates[index];report=self.validate_action(rec,c)
         if not report.valid:return report
         self.accepted[rec.recommendation_id]={'status':'APPROVED','container_id':rec.container_id}

@@ -8,7 +8,8 @@ CSS = """
 html,body,.stApp {font-family: -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;}
 .stApp {background:radial-gradient(ellipse at 82% 0%,#15304066 0%,transparent 36%),#09121f;}
 header[data-testid="stHeader"] {background:transparent; height:2.1rem;}
-[data-testid="stToolbar"] {display:none;}
+[data-testid="stMainMenu"], [data-testid="stAppDeployButton"] {display:none;}
+[data-testid="stSidebar"][aria-expanded="false"] {width:0!important;min-width:0!important;max-width:0!important;}
 .block-container {padding:2.15rem 2.3rem 2rem;max-width:1800px;}
 [data-testid="stSidebar"] {background:#0b1625;border-right:1px solid #203046;width:240px!important;min-width:240px!important;max-width:240px!important;}
 [data-testid="stSidebar"]>div:first-child {padding-top:0;}
@@ -140,3 +141,30 @@ def mins(seconds): return '—' if seconds is None else f'{seconds/60:.1f}'
 
 def footer():
     html('<div class="footer"><span>StowSync · 부산항 수출 FCL 의사결정 지원 제안</span><span>DEMO / 합성 데이터 · 모의 승인 · 실제 시스템 미연계</span></div>')
+
+# Workflow cards retain the same navy / teal visual system.
+CSS = CSS.replace('</style>', '''
+.st-key-eta_inputs,.st-key-connections {border:1px solid #26354a;border-radius:13px;background:#101d2d;padding:20px;margin-top:10px;}
+.quadrant-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:8px 0 20px;}
+.quadrant{background:linear-gradient(130deg,#132538,#101d2d);border:1px solid #2e4259;border-radius:12px;padding:22px;min-height:180px;}
+.quadrant.selected{background:linear-gradient(130deg,#18423f,#122933);border:1px solid #63dcca;box-shadow:inset 3px 0 #63dcca;}
+.quadrant h3{font-size:19px;padding:4px 0 9px;margin:0;color:#e3f1f6;}
+.quadrant p{font-size:12px;line-height:1.9;color:#a1b7ca;margin-bottom:14px;}
+.quadrant span{font-size:10px;color:#74d6c7;}
+.cargo-alert{border:1px solid #775142;border-left:3px solid #f2b775;background:#2d2726;border-radius:9px;padding:15px 19px;margin:4px 0;}
+.cargo-alert p{font-size:12px;line-height:1.8;color:#d8c7b9;margin:10px 0 0;}
+.phone{max-width:370px;background:linear-gradient(155deg,#143734,#0f1e2e 55%);border:6px solid #2b3c4c;border-radius:32px;padding:24px;box-shadow:0 25px 70px #02091180;margin:16px auto;}
+.phone-bar{font-size:10px;color:#8eb5b8;display:flex;justify-content:space-between;margin-bottom:36px;}
+.phone-title{font-size:25px;color:#f0f8fb;letter-spacing:-1px;font-weight:650;line-height:1.4;}
+.phone p{font-size:12px;color:#a3b9cb;line-height:1.8;}
+.phone-container{font-size:12px;padding:13px 0;color:#9bcac5;border-bottom:1px solid #35545b;}
+.phone-slot{font-size:64px;letter-spacing:-3px;color:#78e8d4;padding:14px 0 0;font-weight:650;}
+.phone-slot small{font-size:11px;letter-spacing:2px;margin-left:13px;color:#8ba7b7;}
+.phone-destination{font-size:15px;color:#e2f1f4;padding:8px 0 23px;}
+.phone-route{background:#17343b;border-radius:8px;padding:15px;font-size:11px;color:#a8d2d0;margin-bottom:18px;}
+.phone-status{background:#63dbc9;color:#102a29;border-radius:9px;padding:14px 9px;text-align:center;font-size:12px;font-weight:600;margin-top:20px;}
+.notice-card{padding:20px;border:1px solid #2b4257;border-radius:10px;background:#102333;margin:10px 0 2px;}
+.notice-card span{font-size:10px;color:#84a6bb;}.notice-card h3{font-size:16px;margin:10px 0;padding:0;}.notice-card p{font-size:12px;color:#b0c7d7;}
+.app-table{display:table;}.st-key-connections .app-table td{white-space:normal;}.candidate{min-height:270px;}
+@media(max-width:700px){.quadrant-grid{grid-template-columns:1fr;}.phone{width:100%;}.app-table{display:block;overflow-x:auto;}}
+</style>''')

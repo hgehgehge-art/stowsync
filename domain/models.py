@@ -4,7 +4,7 @@ from hashlib import sha256
 import json
 from pydantic import BaseModel, Field, model_validator
 
-VERSION = "stowsync-1.0.0"
+VERSION = "stowsync-2.0.0"
 ASSUMPTIONS = "synthetic-2026-10-v1"
 START_ISO = "2026-10-09T09:00:00+09:00"
 POLICIES = {"A": "예약 기반", "B": "ETA 기반", "C": "ETA + 사전 재배치"}
@@ -20,6 +20,7 @@ PRESETS = {
     "reversal": "선적 계획 역전",
     "surprise": "사전 이동 중 조기 도착",
     "cutoff": "게이트 마감 초과",
+    "premarshal_demo": "유휴시간 선작업 검토",
 }
 
 class Config(BaseModel):
@@ -45,6 +46,7 @@ class Config(BaseModel):
     eta_stale: int = Field(600, ge=60)
     tolerance: int = Field(600, ge=0)
     min_gain: float = Field(60, ge=0)
+    min_eta_trust: int = Field(65, ge=0, le=100)
 
     @model_validator(mode="after")
     def valid_preset(self):
@@ -62,6 +64,9 @@ class Container:
     weight_t: float
     initial: bool = False
     size_ft: int = 20
+    cargo_type: str = "일반"
+    hazard_class: str = ""
+    connecting_vessel: str = ""
 
 @dataclass(frozen=True)
 class Forecast:
@@ -72,6 +77,7 @@ class Forecast:
     p50: int
     p90: int
     source: str = "synthetic_forecast"
+    trust_score: int = 80
 
 @dataclass(frozen=True)
 class PlanEntry:
@@ -128,6 +134,9 @@ class Candidate:
     sample_scores: list[float]
     reason_codes: list[str]
     move_seconds: int
+    rehandles: float = 0
+    premarshals: float = 0
+    preference: float = 0
 
 @dataclass
 class Recommendation:
@@ -143,6 +152,7 @@ class Recommendation:
     keep_score: float | None = None
     non_worse: int = 0
     reason: str = ""
+    keep_rehandles: float = 0
 
 @dataclass
 class ValidationReport:

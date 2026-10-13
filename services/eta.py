@@ -20,7 +20,7 @@ def sample_arrivals(o,policy):
             if cid in o.yard_arrivals:
                 sampled[cid]=o.yard_arrivals[cid]; continue
             u=rng.random(); f=o.forecasts.get(cid)
-            if policy=='A' or f is None or o.now-f.observed_at>=o.config.eta_stale:
+            if policy=='A' or f is None or o.now-f.observed_at>=o.config.eta_stale or f.trust_score<o.config.min_eta_trust:
                 begin=max(o.now,c.booking_start)
                 end=c.booking_end if c.booking_end>begin else begin+max(60,c.booking_end-c.booking_start)
                 t=begin+u*(end-begin)
