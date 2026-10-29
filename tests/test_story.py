@@ -16,6 +16,8 @@ def button(at, label):
 
 
 def walk_to_decision(at, focus):
+    assert at.segmented_control[0].value == '⓪ 관제'                              # 시작은 20개 전체 관제
+    at.segmented_control[0].set_value('① 상황 확인').run()
     button(at, '도착 정보 확인 완료').click().run()
     button(at, f'{focus}의 CY 도착까지 진행').click().run()
     at.segmented_control[0].set_value('③ 대안 비교').run()
@@ -155,3 +157,19 @@ def test_no_preference_learning_or_scoring_left():
     src = ''.join(p.read_text(encoding='utf-8') for p in list(root.glob('*.py')) + list((root / 'ui').glob('*.py')) + list((root / 'services').glob('*.py')))
     for word in ('train_preferences', 'personalize', 'trained_model', '선호모델', '현장 판단 학습'):
         assert word not in src, word
+
+
+def test_overview_picks_focus_first_and_plan_change_keeps_valid_position():
+    from services.story import review_queue, apply_plan_change
+    sim, story = start_story()
+    assert review_queue(sim)[0]['cid'] == story['focus']                          # 검토 순위 1위 = 대표
+    focus = story['focus']
+    while sim.statuses[focus] != 'YARD_QUEUE':
+        sim.advance(one_event=True)
+    rec, keep_i, best_i, n = build_options(sim.observe(), focus, story['planned'])
+    assert sim.approve(rec, best_i).valid
+    while sim.statuses[focus] != 'STORED':
+        sim.advance(one_event=True)
+    old = sim.plan[focus].due
+    r = apply_plan_change(sim, story, -30)
+    assert r['mode'] == 'stored' and r['keep'] and r['new_due'] == old - 1800

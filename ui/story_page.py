@@ -7,14 +7,15 @@ from domain.models import slot
 from engine.yard import locate, rank
 from services.recommend import propose_premarshal
 from services.story import (STEPS, gate_and_yard_times, planned_conflict, blocking_pairs, build_options,
-                            compare_branches, replay_steps, progress_state)
+                            compare_branches, replay_steps, progress_state, review_queue, apply_plan_change)
+import plotly.graph_objects as go
 from ui.theme import html, badge, panel, table, tm, mins
 from ui.scene import yard_figure, replay_figure, LEGEND
 
 STATUS = {'EN_ROUTE': '운송 중', 'GATE_QUEUE': '게이트 대기', 'GATE_SERVICE': '게이트 처리', 'INTERNAL_TRAVEL': 'CY 이동 중',
           'YARD_QUEUE': '하차 대기', 'BLOCKED_CAPACITY': '공간 부족', 'STORED': '적치 완료', 'IN_MOVE': '작업 중',
           'RETRIEVED': '인출 완료', 'EXCEPTION_LATE': '마감 예외', 'WAIT_GATE_OPEN': '반입 대기'}
-STAGES = ['① 상황 확인', '② 문제 확인', '③ 대안 비교', '④ 승인·보류', '⑤ 작업 실행', '⑥ 결과 확인']
+STAGES = ['⓪ 관제', '① 상황 확인', '② 문제 확인', '③ 대안 비교', '④ 승인·보류', '⑤ 현장 안내·실행', '⑥ 계획 변경 대응', '⑦ 결과 확인']
 REASONS = ['선택 안 함', '추천 근거와 현장 조건 일치', '장비 작업 순서 고려', '현장 혼잡', '시스템이 모르는 현장 제약', '기타']
 SCOPE = '평가 범위: 야드 전체(블록 A1·B1) · 앞으로 60분 · 가능한 도착 상황 {n}가지를 가정한 예상 평균'
 
@@ -95,11 +96,11 @@ def checklist(sim, story):
 def suggested_stage(sim, story):
     cid = story['focus']; d = story.get('decision'); p = story['progress']
     if story.get('compare'):
-        return 5
+        return 7
     if d:
-        return 4 if d['type'] == 'approve' else 3
+        return 5 if d['type'] == 'approve' else 4
     if sim.statuses[cid] == 'YARD_QUEUE':
-        return 2 if p.get('compared') else (1 if not p.get('problem_seen') else 2)
+        return 3 if p.get('compared') else (2 if not p.get('problem_seen') else 3)
     return 0
 
 
@@ -133,7 +134,7 @@ def story_page(sim, story, goto, reset):
         stage = STAGES[suggested_stage(sim, story)]
     idx = STAGES.index(stage)
     rec_info = None
-    if idx in (2, 3) and sim.statuses[cid] == 'YARD_QUEUE' and not story.get('decision'):
+    if idx in (3, 4) and sim.statuses[cid] == 'YARD_QUEUE' and not story.get('decision'):
         rec_info = build_options(o, cid, story['planned'])
     left, right = st.columns([1.55, 1], gap='medium')
     with left:
@@ -142,7 +143,7 @@ def story_page(sim, story, goto, reset):
             legend3d()
     with right:
         with st.container(key='focus'):
-            [stage_situation, stage_problem, stage_options, stage_decide, stage_execute, stage_result][idx](sim, story, rec_info, goto)
+            [stage_overview, stage_situation, stage_problem, stage_options, stage_decide, stage_execute, stage_change, stage_result][idx](sim, story, rec_info, goto)
     history(sim, story)
 
 
@@ -153,12 +154,15 @@ def render_canvas(sim, story, idx, rec_info):
     if story['planned'] and not locate(o.yard, cid):
         planned_mark = (story['planned'], len(o.yard[story['planned']]) + 1) if len(o.yard[story['planned']]) < 4 else None
     focus_only = st.toggle('선택 화물 보기(나머지는 흐리게)', key='focus_only')
-    if idx == 4 and d and d['type'] == 'approve':
+    if idx == 0:
+        render_overview(sim, story)
+        return
+    if idx == 5 and d and d['type'] == 'approve':
         panel('승인한 작업 재생', 'REPLAY · 실행 로그', '승인 전 → 이동 중 → 완료. 다시 재생해도 작업·이동 횟수는 늘지 않습니다.')
         steps, final = replay_steps(sim.bundle, sim.moves, d['at'], sim.now, cid)
         chart(replay_figure(sim.bundle, sim.plan, steps, final, cid, trucks_at(sim)), 'yard3d_replay_ops')
         return
-    if idx == 5 and story.get('compare'):
+    if idx == 7 and story.get('compare'):
         cmp = story['compare']
         tabs = st.tabs(['선택한 대안 재생', '기존 계획 유지 재생'])
         for tab, key in zip(tabs, ('chosen', 'keep')):
@@ -176,10 +180,10 @@ def render_canvas(sim, story, idx, rec_info):
         return
     target = None
     title = f'야드 현재 상태 · {tm(o.now)}'
-    if rec_info and idx in (2, 3):
+    if rec_info and idx in (3, 4):
         rec, keep_i, best_i, _ = rec_info
         if rec.candidates:
-            pick = st.session_state.get('story_choice' if idx == 3 else 'story_option', st.session_state.get('story_option', best_i if best_i is not None else 0))
+            pick = st.session_state.get('story_choice' if idx == 4 else 'story_option', st.session_state.get('story_option', best_i if best_i is not None else 0))
             pick = min(pick, len(rec.candidates) - 1)
             c = rec.candidates[pick]; target = (c.stack, c.tier)
             title = f'대안 미리보기 · {cid} → {slot(c.stack, c.tier)}'
@@ -249,7 +253,7 @@ def stage_situation(sim, story, rec_info, goto):
         if st.button(f'{cid}의 CY 도착까지 진행', width='stretch', key='to_arrival',
                      help='시뮬레이션 시각을 진행합니다. 다른 화물은 같은 규칙으로 자동 처리됩니다.'):
             advance_until(sim, lambda: sim.statuses[cid] in ('YARD_QUEUE', 'EXCEPTION_LATE'))
-            go_stage(1)
+            go_stage(2)
         st.caption('진행하면 그사이 도착한 다른 화물은 같은 규칙(기준 정책)으로 자동 적치됩니다.')
     else:
         st.caption(f'{cid}는 {STATUS[sim.statuses[cid]]} 상태입니다. ② 문제 확인으로 넘어가세요.')
@@ -310,6 +314,7 @@ def stage_options(sim, story, rec_info, goto):
     if not rec.candidates:
         html('<div class="why danger">공간·하중·화물 제약을 만족하는 위치가 없습니다.</div>'); return
     rows = option_rows(o, rec, keep_i, best_i, n)
+    story['last_best'] = rec.candidates[best_i].stack if best_i is not None else None
     pick = st.radio('3D로 볼 대안', [r['i'] for r in rows], horizontal=True, key='story_option',
                     index=[r['i'] for r in rows].index(best_i) if best_i is not None else 0,
                     format_func=lambda i: ('기존 계획' if i == keep_i else '대안 ' + str(i if keep_i == 0 else i + 1)) + (' ★' if i == best_i else ''))
@@ -336,7 +341,7 @@ def stage_options(sim, story, rec_info, goto):
     else:
         st.caption(f'선작업 후보: {pm.container_id} → {slot(pm.candidates[0].stack, pm.candidates[0].tier)} · 유휴시간 선작업 화면에서 따로 검토합니다.')
     if st.button('대안 비교 완료 → 승인 단계로', type='primary', width='stretch', disabled=bool(story['progress'].get('compared'))):
-        story['progress']['compared'] = tm(sim.now); go_stage(3)
+        story['progress']['compared'] = tm(sim.now); go_stage(4)
 
 
 def stage_decide(sim, story, rec_info, goto):
@@ -349,10 +354,10 @@ def stage_decide(sim, story, rec_info, goto):
             st.caption('보류는 실행 완료로 처리하지 않습니다. 대표 컨테이너는 하차 대기 상태로 남습니다.')
             if st.button('보류 해제 후 다시 검토', width='stretch'):
                 story['decision'] = None; story['progress'].pop('compared', None)
-                go_stage(2)
+                go_stage(3)
         else:
             if st.button('⑤ 작업 실행 보기', type='primary', width='stretch'):
-                go_stage(4)
+                go_stage(5)
         return
     if sim.statuses[cid] != 'YARD_QUEUE' or not rec_info or not rec_info[0].candidates:
         html('<div class="why">대표 컨테이너가 CY에 도착하고 대안이 계산된 뒤 승인할 수 있습니다.</div>'); return
@@ -386,7 +391,7 @@ def stage_decide(sim, story, rec_info, goto):
                                  'slot': slot(c.stack, c.tier), 'label': labels[choice], 'reason': '' if reason == REASONS[0] else reason}
             log_decision(story, sim, cid, '승인', labels[choice], story['decision']['reason'], rec.recommendation_id)
             story['guide'] = {'lane': f'{o.containers[cid].block} 블록', 'at': tm(sim.now)}
-            go_stage(4)
+            go_stage(5)
         else:
             st.error(' · '.join(rep.errors))
     if b.button('보류', width='stretch', key='story_hold'):
@@ -404,7 +409,7 @@ def log_decision(story, sim, cid, word, where, reason, rid):
 
 def stage_execute(sim, story, rec_info, goto):
     cid = story['focus']; d = story.get('decision')
-    panel('⑤ 작업 실행', 'SIMULATED WORK', '승인한 작업을 모의 장비가 실행하고, 같은 사례를 인출까지 이어갑니다.')
+    panel('⑤ 현장 안내·실행', 'SIMULATED WORK', '승인한 작업을 모의 장비가 실행하고, 같은 사례를 인출까지 이어갑니다.')
     if not d:
         html('<div class="why">아직 판단하지 않았습니다. ④ 단계에서 승인하거나 보류하세요.</div>'); return
     if d['type'] == 'hold':
@@ -416,8 +421,7 @@ def stage_execute(sim, story, rec_info, goto):
                            ['기사 안내(미리보기)', f'{story["guide"]["at"]} · {story["guide"]["lane"]} 하차 지점 안내 생성' if story.get('guide') else '—'],
                            ['시뮬레이션 시각', tm(sim.now)]])
     if story.get('guide'):
-        source_card('allcone', [('기사 안내', f'{story["guide"]["lane"]}로 진입해 주세요'), ('발행', story['guide']['at']),
-                                ('컨테이너', cid)], '기사 화면에는 하차 지점(블록)만 보이고, 적치 슬롯 번호와 야드 전체 정보는 보이지 않습니다.')
+        role_notices(sim, story, cid, d)
     if st.button('작업 완료까지 진행', type='primary', width='stretch', disabled=acc == 'COMPLETED'):
         advance_until(sim, lambda: sim.accepted.get(d['rec_id'], {}).get('status') == 'COMPLETED'); st.rerun()
     if st.button(f'{cid} 본선 인출까지 진행', width='stretch', disabled=sim.statuses[cid] == 'RETRIEVED' or acc != 'COMPLETED',
@@ -510,3 +514,114 @@ def history(sim, story):
             table(['시각', '구분', '컨테이너', '위치', '내용'], rows)
         else:
             st.caption('아직 기록이 없습니다.')
+
+
+# ── ⓪ 관제 ─────────────────────────────────────────────
+def render_overview(sim, story):
+    panel('20개 화물 도착 현황', 'ARRIVAL BOARD', '회색 막대 = 반입 예약 구간 · 점 = 최신 ETA(운송 중) 또는 실제 도착 · 노랑 = 대표 컨테이너')
+    rows = review_queue(sim)
+    o = sim.observe()
+    fig = go.Figure()
+    order = sorted(rows, key=lambda r: r['booking'][0])
+    for r in order:
+        y = f'…{r["cid"][-4:]} · #{r["seq"]}'
+        hl = r['cid'] == story['focus']
+        fig.add_trace(go.Scatter(x=[r['booking'][0] / 60, r['booking'][1] / 60], y=[y, y], mode='lines',
+                                 line=dict(color='#FFD12E' if hl else '#3d536e', width=12), showlegend=False,
+                                 hovertemplate=f'{r["cid"]} 예약 {tm(r["booking"][0])}–{tm(r["booking"][1])}<extra></extra>'))
+        if r['ref'] is not None:
+            late = (r['dev'] or 0) > 0
+            fig.add_trace(go.Scatter(x=[r['ref'] / 60], y=[y], mode='markers', showlegend=False,
+                                     marker=dict(size=13 if hl else 10, symbol='circle' if r['kind'] == 'ETA' else 'diamond',
+                                                 color='#E0474C' if late else '#64d8c5', line=dict(color='#05080D', width=1.5)),
+                                     hovertemplate=f'{r["cid"]} {r["kind"]} {tm(r["ref"])}<extra></extra>'))
+    fig.add_vline(x=sim.now / 60, line_dash='dot', line_color='#e6b877', annotation_text=f'현재 {tm(sim.now)}', annotation_font_color='#e6b877')
+    ticks = list(range(0, 181, 15))
+    fig.update_xaxes(tickvals=ticks, ticktext=[tm(t * 60) for t in ticks], gridcolor='#25384b', tickfont_size=10)
+    fig.update_yaxes(autorange='reversed', gridcolor='#25384b', tickfont=dict(size=11))
+    fig.update_layout(height=420, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(l=96, r=10, t=10, b=30),
+                      font=dict(color='#a8bdd0'))
+    chart(fig, 'overview_board')
+    n_init = sum(c.initial for c in o.containers.values())
+    st.caption(f'전체 {len(o.containers)}개 중 {n_init}개는 이미 야드에 있고, {len(o.containers) - n_init}개가 반입 예정입니다. '
+               '빨간 점은 예약 구간보다 늦게 올 것으로 예측된 화물입니다.')
+
+
+def stage_overview(sim, story, rec_info, goto):
+    cid = story['focus']
+    panel('⓪ 관제 · 검토 대상 선정', 'WHO NEEDS REVIEW', '올컨e·Port-i·TOS 정보를 모아 반입 예정 화물의 검토 순서를 정합니다.')
+    rows = review_queue(sim)
+    out = []
+    for i, r in enumerate(rows, 1):
+        dev = '—' if r['dev'] is None else ('예약대로' if r['dev'] == 0 else f'{r["dev"] / 60:+.0f}분')
+        mark = '★ ' if r['cid'] == cid else ''
+        cls = 'focus-row' if r['cid'] == cid else ''
+        out.append([f'<span class="{cls}">{i}</span>', f'<b class="{cls}">{mark}{escape(r["cid"])}</b>', STATUS.get(r['status'], r['status']),
+                    escape(dev), badge(f'{r["arrival"]} · 선적 {r["priority"]}', 'amber' if r['rank_q'] == 0 else ''), f'#{r["seq"]}'])
+    table(['순위', '컨테이너', '상태', '예약 대비', '상황 분류', '선적'], out)
+    top = rows[0] if rows else None
+    if top and top['cid'] == cid:
+        html(f'<div class="why"><b>왜 이 컨테이너부터 보나요?</b><br>{escape(cid)}는 <b>지연 도착 × 선적 상위</b>입니다. '
+             '먼저 실어야 하는데 늦게 오면, 그사이 다른 화물이 위에 쌓이거나 원래 자리가 막힐 수 있어 검토 순위 1위가 됩니다. '
+             '분류는 검토 순서를 정하는 데만 쓰고, 위치는 ③에서 계산으로 정합니다.</div>')
+    else:
+        html(f'<div class="why">지금 검토 순위 1위는 {escape(top["cid"]) if top else "—"}입니다. 이 흐름은 대표 컨테이너 {escape(cid)}를 따라갑니다.</div>')
+    if st.button('대표 컨테이너 검토 시작 → ① 상황 확인', type='primary', width='stretch'):
+        go_stage(1)
+
+
+# ── ⑤ 역할별 결과 안내 ─────────────────────────────────
+def role_notices(sim, story, cid, d):
+    g = story['guide']
+    left, right = st.columns([1, 1.15])
+    with left:
+        html(f'<div class="phone mini"><div class="phone-bar">{tm(sim.now)} <span>올컨e · 모의</span></div>'
+             f'<div class="phone-title">하차 위치가<br>정해졌어요</div><p>{escape(cid)}</p>'
+             f'<div class="phone-slot">{escape(g["lane"].split()[0])}<small>BLOCK</small></div>'
+             f'<div class="phone-route">게이트 → 지정 진입로 → {escape(g["lane"])} 인계 지점</div>'
+             f'<div class="phone-status">{g["at"]} 발행 · 슬롯 번호는 표시하지 않음</div></div>')
+    with right:
+        rows = [['야드 플래너', f'{d["slot"]} 승인 · 대안 비교 근거 · 판단 사유'],
+                ['관제 담당', f'YC-{d["slot"][:2]} 작업 지시 · 트럭 → {d["slot"]}'],
+                ['운송기사(올컨e)', f'{g["lane"]} 하차 지점만'],
+                ['선사', '반입·적치 완료 여부만(위치 비공개)']]
+        table(['받는 사람', '받는 정보'], [[a, escape(b)] for a, b in rows])
+        st.caption('같은 결정을 역할에 필요한 만큼만 나눠 전합니다. 실제 알림은 보내지 않습니다.')
+
+
+# ── ⑥ 계획 변경 대응 ────────────────────────────────────
+def stage_change(sim, story, rec_info, goto):
+    cid = story['focus']
+    panel('⑥ 계획 변경 대응', 'RE-EVALUATE', 'Port-i 선박 일정이 바뀌면 TOS 인출 시각이 달라지고, 기존 결정을 다시 확인합니다.')
+    pc = story.get('plan_change')
+    if pc is None:
+        source_card('porti', [('사건(모의)', 'OCEAN HARMONY 접안 30분 앞당김'), ('영향', 'TOS 본선 인출 예정시각 30분 앞당김')],
+                    '이미 진행 중이거나 5분 안에 시작할 작업은 바꾸지 않습니다.')
+        if st.button('선박 일정 변경 반영(30분 앞당김)', type='primary', width='stretch',
+                     help='대표 사례 데이터에만 반영됩니다. ⑦ 결과 비교는 결정 직전 상태 기준이라 이 변경과 무관합니다.'):
+            apply_plan_change(sim, story, -30)
+            story.setdefault('log', []).append({'시각': tm(sim.now), '컨테이너': cid, '결정': '계획 변경',
+                                                '위치': story['plan_change']['version'], '사유': '선박 접안 30분 앞당김 · 재평가'})
+            st.rerun()
+        return
+    rows = [['계획 버전', f'{pc["old_version"]} → {pc["version"]}'],
+            ['대표 인출 예정', f'{tm(pc["old_due"])} → {tm(pc["new_due"])}']]
+    source_card('tos', rows)
+    if pc['mode'] == 'stored':
+        if pc['keep']:
+            html(f'<div class="why"><b>현재 위치를 유지합니다.</b><br>{escape(cid)}는 {pc["slot"]}에 있고, 아래에 먼저 실을 화물이 없으며 '
+                 '위에도 늦게 실을 화물이 없습니다. 인출 시각만 앞당겨졌고 인출 순서는 그대로라, 옮길 필요가 없습니다. 선작업도 하지 않습니다.</div>')
+        else:
+            html(f'<div class="why danger"><b>다시 검토가 필요합니다.</b><br>{escape(cid)} 위·아래 화물과 인출 순서가 맞지 않습니다'
+                 f'(가로막는 화물 {len(pc["covered_by"])}개, 가로막히는 화물 {len(pc["blocks"])}개). 유휴시간 선작업 화면에서 확인하세요.</div>')
+    elif pc['mode'] == 'pending':
+        if pc['keep']:
+            html(f'<div class="why"><b>기존 추천을 유지합니다.</b><br>계획 버전이 바뀌어 기존 추천은 만료됐지만, 새 계획으로 다시 계산해도 '
+                 f'가장 나은 위치가 {escape(pc["new_best"] or "—")}로 같습니다. ③에서 새 버전 기준으로 승인하면 됩니다.</div>')
+        else:
+            html(f'<div class="why danger"><b>추천이 바뀌었습니다.</b><br>새 계획 기준 최선 위치가 {escape(pc["prev_best"] or "—")} → '
+                 f'{escape(pc["new_best"] or "—")}로 달라졌습니다. ③에서 다시 비교해 주세요.</div>')
+    elif pc['mode'] == 'retrieved':
+        html('<div class="why">대표 컨테이너는 이미 본선에 실렸습니다. 이 변경은 남은 화물의 인출 시각에만 반영됩니다.</div>')
+    else:
+        html('<div class="why">대표 컨테이너가 아직 운송 중입니다. 도착 후 새 계획 기준으로 대안을 계산합니다.</div>')

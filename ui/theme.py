@@ -203,5 +203,9 @@ CSS = CSS.replace('</style>', '''
 .src-row b{color:#eaf2f9;font-weight:600;text-align:right;}
 .src-note{font-size:11px;color:#8ea3b6;margin-top:5px;line-height:1.55;}
 .src-tag{font-style:normal;font-size:9px;color:var(--src);border:1px solid var(--src);border-radius:4px;padding:0 4px;margin-left:3px;opacity:.9;}
+.phone.mini{max-width:260px;padding:16px;border-width:4px;border-radius:24px;margin:6px auto;}
+.phone.mini .phone-title{font-size:18px;}
+.phone.mini .phone-bar{margin-bottom:14px;}
+.focus-row{color:#FFD12E!important;}
 .app-table .good{color:#59e0ce;font-weight:600;}.app-table .bad{color:#ee99a4;font-weight:600;}
 </style>''')

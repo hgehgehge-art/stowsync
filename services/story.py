@@ -172,3 +172,65 @@ def progress_state(story, sim):
     return {'도착 정보 확인': p.get('arrival_checked'), '대안 비교': p.get('compared'),
             '승인 또는 보류': d['type'] if d else None, '작업 완료': done_job,
             '결과 확인': p.get('result_checked')}
+
+
+# ── ⓪ 관제: 검토 대상 선정 ─────────────────────────────
+QUAD_ORDER = {('지연', '상위'): 0, ('조기', '하위'): 1, ('지연', '하위'): 2, ('조기', '상위'): 3}
+
+
+def review_queue(sim):
+    """반입 예정 화물을 검토 우선순위로 정렬합니다. 2×2 분류는 정렬과 설명에만 쓰고 위치를 고정하지 않습니다."""
+    from services.workflows import quadrant
+    o = sim.observe()
+    rows = []
+    for cid, c in o.containers.items():
+        if c.initial:
+            continue
+        f = o.forecasts.get(cid)
+        t = sim.trucks.get(cid)
+        arrival, priority = quadrant(o, cid)
+        if t:
+            ref = t['gate_arrival']; eta_txt = 'ATA'
+        elif f:
+            ref = f.p50; eta_txt = 'ETA'
+        else:
+            ref = None; eta_txt = ''
+        dev = None if ref is None else (ref - c.booking_end if ref > c.booking_end else ref - c.booking_start if ref < c.booking_start else 0)
+        rank_q = QUAD_ORDER.get((arrival, priority), 4)
+        rows.append({'cid': cid, 'arrival': arrival, 'priority': priority, 'dev': dev, 'ref': ref, 'kind': eta_txt,
+                     'seq': o.plan[cid].sequence, 'status': sim.statuses[cid], 'cargo': c.cargo_type,
+                     'booking': (c.booking_start, c.booking_end), 'rank_q': rank_q})
+    rows.sort(key=lambda r: (r['rank_q'], -abs(r['dev'] or 0), r['seq']))
+    return rows
+
+
+# ── ⑥ 계획 변경 대응 ─────────────────────────────────
+def apply_plan_change(sim, story, minutes=-30):
+    """Port-i 선박 일정 변경(접안 앞당김)을 TOS 인출 예정시각에 반영하고, 대표 컨테이너 결정을 재평가합니다."""
+    from services.workflows import change_vessel
+    focus = story['focus']
+    before_due = sim.plan[focus].due
+    before_ver = sim.plan_version
+    version, shift = change_vessel(sim, minutes)
+    o = sim.observe()
+    pos = locate(o.yard, focus)
+    result = {'at': sim.now, 'minutes': minutes, 'version': version, 'old_version': before_ver,
+              'old_due': before_due, 'new_due': sim.plan[focus].due}
+    if pos:
+        stack = o.yard[pos[0]]
+        i = pos[1] - 1
+        below_earlier = [x for x in stack[:i] if rank(o.plan, x) < rank(o.plan, focus)]
+        above_later = [x for x in stack[i + 1:] if rank(o.plan, x) > rank(o.plan, focus)]
+        result.update({'mode': 'stored', 'slot': slot(pos[0], pos[1]), 'blocks': below_earlier, 'covered_by': above_later,
+                       'keep': not below_earlier and not above_later})
+    elif sim.statuses[focus] == 'YARD_QUEUE':
+        rec, keep_i, best_i, n = build_options(o, focus, story['planned'])
+        prev = story.get('last_best')
+        new = rec.candidates[best_i].stack if best_i is not None else None
+        result.update({'mode': 'pending', 'prev_best': prev, 'new_best': new, 'keep': prev == new})
+    elif sim.statuses[focus] == 'RETRIEVED':
+        result.update({'mode': 'retrieved', 'keep': True})
+    else:
+        result.update({'mode': 'en_route', 'keep': True})
+    story['plan_change'] = result
+    return result

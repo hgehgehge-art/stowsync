@@ -422,5 +422,5 @@ def data_page():
  'premarshal':lambda:premarshal_page(sim,chart,reset_operations,goto),
  'sharing':lambda:sharing_page(sim)}[page]()
 if not st.session_state.capture_mode and page in ('dashboard','eta','story'):
-    st.caption('시연 방법: 대표 사례 흐름에서 ① 상황 확인 → ② 문제 확인 → ③ 대안 비교 → ④ 승인·보류 → ⑤ 작업 실행 → ⑥ 결과 확인')
+    st.caption('시연 방법: 대표 사례 흐름에서 ⓪ 관제 → ① 상황 확인 → ② 문제 확인 → ③ 대안 비교 → ④ 승인·보류 → ⑤ 현장 안내·실행 → ⑥ 계획 변경 대응 → ⑦ 결과 확인')
 footer()
