@@ -210,7 +210,7 @@ def review_queue(sim):
 
 # ── ⑥ 계획 변경 대응 ─────────────────────────────────
 def apply_plan_change(sim, story, minutes=-30):
-    """Port-i 선박 일정 변경(접안 앞당김)을 TOS 인출 예정시각에 반영하고, 대표 컨테이너 결정을 재평가합니다."""
+    """선박 일정 변경(접안 앞당김)을 TOS 인출 예정시각에 반영하고, 대표 컨테이너 결정을 재평가합니다."""
     from services.workflows import change_vessel
     focus = story['focus']
     before_due = sim.plan[focus].due

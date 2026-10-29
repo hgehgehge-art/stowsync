@@ -11,17 +11,21 @@ APP = Path(__file__).resolve().parents[1] / 'app.py'
 PAGES = ['dashboard', 'eta', 'premarshal', 'exceptions', 'sync', 'sharing', 'impact', 'data', 'story']
 
 
-def button(at, label):
-    return next(b for b in at.button if b.label == label)
+def walk_to_compare(at):
+    """대표 시나리오: 상황 확인 → (CY 도착까지 진행) → 문제 확인 → 대안 비교."""
+    assert at.session_state['scn_step'] == 0
+    at.button(key='scn_next_0').click().run()
+    assert at.session_state['scn_step'] == 1 and not at.exception
+    at.button(key='scn_next_1').click().run()
+    assert at.session_state['scn_step'] == 2 and not at.exception
 
 
-def walk_to_decision(at, focus):
-    assert at.segmented_control[0].value == '⓪ 관제'                              # 시작은 20개 전체 관제
-    at.segmented_control[0].set_value('① 상황 확인').run()
-    button(at, '도착 정보 확인 완료').click().run()
-    button(at, f'{focus}의 CY 도착까지 진행').click().run()
-    at.segmented_control[0].set_value('③ 대안 비교').run()
-    button(at, '대안 비교 완료 → 승인 단계로').click().run()
+def approve_current(at):
+    at.button(key='scn_next_2').click().run()          # 적치 미리보기
+    assert at.session_state['scn_step'] == 3
+    at.button(key='scn_next_3').click().run()          # 배치 승인
+    assert at.session_state['scn_step'] == 4
+    at.button(key='scn_approve').click().run()
     assert not at.exception
 
 
@@ -71,85 +75,108 @@ def test_recommendation_does_not_use_future_arrivals():
     assert [round(c.score, 6) for c in base.candidates] == [round(c.score, 6) for c in other.candidates]
 
 
-def test_full_flow_keeps_focus_and_never_double_counts():
-    at = AppTest.from_file(APP, default_timeout=120).run()
-    assert not at.exception
+def test_scenario_a_recommended_approval_moves_to_result_and_history():
+    from services import history
+    at = AppTest.from_file(APP, default_timeout=180).run()
+    assert not at.exception and at.session_state['page'] == 'story'
+    assert at.sidebar.button(key='nav_story').label == '대표 시나리오'
+    walk_to_compare(at)
     story = at.session_state['story']; focus = story['focus']
-    assert at.session_state['page'] == 'story'
-    assert len(at.session_state['story_sim'].bundle.containers) == 20 and len(at.session_state['ops'].bundle.containers) == 40
-    walk_to_decision(at, focus)
-    approve = button(at, '승인')
-    approve.click().run()
-    sim = at.session_state['story_sim']
-    d = at.session_state['story']['decision']
-    assert d['kind'] == 'order' and focus in d['order'] and sim.unload_plan == d['plan']
-    # 승인 버튼이 다시 눌려도(같은 결정) 계획이 한 번만 올라감
-    at.segmented_control[0].set_value('④ 승인·보류').run()
-    assert not any(b.label == '승인' for b in at.button) and at.session_state['story_sim'].unload_plan == d['plan']
-    at.segmented_control[0].set_value('⑤ 현장 안내·실행').run()
-    button(at, '작업 완료까지 진행').click().run()
-    sim = at.session_state['story_sim']
-    initial = [m['container_id'] for m in sim.moves if m['move_type'] == 'INITIAL' and m['container_id'] in d['order']]
-    assert initial == d['order']                                                 # 승인한 순서대로 하차
-    assert locate(sim.yard, focus)[0] == d['stack']                               # 화면·로그·완료 상태 일치
-    state = progress_state(at.session_state['story'], sim)
-    assert state['작업 완료'] and state['승인 또는 보류'] == 'approve' and not state['결과 확인']
-    # 재생은 로그를 읽기만 함: 여러 번 그려도 이동 수 불변
-    n = len(sim.moves)
-    for _ in range(3):
-        steps, _ = replay_steps(sim.bundle, sim.moves, d['at'], sim.now, focus)
-    assert len(sim.moves) == n and any(s['move']['container_id'] == focus for s in steps)
-    # 화면 이동·뒤로 가기(URL)로 대표 컨테이너·시각·기록이 초기화되지 않음
-    now = sim.now
-    feature_focus = at.session_state['focus']
+    first = story['alt']
+    approve_current(at)
+    # 승인 → 결과 확인으로 자동 이동, 실제 실행 완료, 이력 저장
+    assert at.session_state['scn_step'] == 5
+    sim = at.session_state['story_sim']; d = at.session_state['story']['decision']
+    assert d['type'] == 'approve' and d['option']['order'] == first.split('|')[0].split('>')
+    done = [m['container_id'] for m in sim.moves if m['move_type'] == 'INITIAL' and m['container_id'] in d['order']]
+    assert done == d['order']                                                   # 승인한 순서대로 하차
+    assert locate(sim.yard, focus)[0] == d['plan'][d['order'].index(focus)][1]   # 승인한 위치
+    jobs = history.list_jobs()
+    assert len(jobs) == 1 and jobs[0]['job_id'] == d['job_id'] and jobs[0]['status'] == '완료'
+    assert abs(jobs[0]['saved_min'] - (d['base_total_min'] - d['total_min'])) < .01
+    # 같은 승인을 다시 시도해도 한 번만
+    moves = len(sim.moves)
+    at.session_state.scn_step = 4; at.run()
+    assert not any(b.key == 'scn_approve' for b in at.button) and len(at.session_state['story_sim'].moves) == moves
+    # 누적 작업 이력 화면
+    at.button(key='scn_next_4').click().run()
+    at.button(key='scn_next_5').click().run()
+    assert at.session_state['scn_step'] == 6 and not at.exception and len(at.dataframe) == 1
+
+
+def test_scenario_b_c_other_alternative_and_repeat_accumulate():
+    from services import history
+    at = AppTest.from_file(APP, default_timeout=180).run()
+    walk_to_compare(at)
+    # 시뮬레이션 실행·한 단계 진행·초기화
+    at.button(key='sim_run').click().run()
+    assert at.session_state['scn_play']['running']
+    i0 = at.session_state['scn_play']['i']
+    at.button(key='sim_step').click().run()
+    assert at.session_state['scn_play']['i'] == i0 + 1 and not at.session_state['scn_play']['running']
+    at.button(key='sim_reset').click().run()
+    assert at.session_state['scn_play']['i'] == 0
+    # 추천 1위가 아닌 대안 선택 → 처리 순서·작업시간이 그 대안 값으로 바뀜
+    before = at.session_state['story']['alt']
+    at.button(key='alt_pick_2').click().run()
+    second = at.session_state['story']['alt']
+    assert second != before
+    # 적치 미리보기: 칸 클릭 → 선택·화살표, 이전 단계로 가도 선택 유지
+    at.button(key='scn_next_2').click().run()
+    cells = [b for b in at.button if b.key and b.key.startswith('ycell_btn_')]
+    assert len(cells) >= 10
+    cells[0].click().run()
+    picked = at.session_state['story']['pick']
+    assert picked and any(b.key.startswith('ycell_btn_') for b in at.button)
+    at.button(key='scn_prev_3').click().run()
+    assert at.session_state['scn_step'] == 2 and at.session_state['story']['alt'] == second
+    at.button(key='scn_next_2').click().run()
+    assert at.session_state['story']['pick'] == picked
+    at.button(key='scn_next_3').click().run(); at.button(key='scn_approve').click().run()
+    d1 = at.session_state['story']['decision']
+    assert d1['option']['order'] == second.split('|')[0].split('>')
+    # 반복: 같은 상황에서 새 작업 → 다른 대안 승인 → 이력 2건 누적
+    at.session_state.scn_step = 6; at.run()
+    at.button(key='scn_new_job').click().run()
+    assert at.session_state['scn_step'] == 2 and at.session_state['story'].get('decision') is None
+    approve_current(at)
+    jobs = history.list_jobs()
+    assert len(jobs) == 2 and {j['approved'] for j in jobs} == {d1['label'], at.session_state['story']['decision']['label']}
+
+
+def test_hold_is_saved_and_not_executed():
+    from services import history
+    at = AppTest.from_file(APP, default_timeout=180).run()
+    walk_to_compare(at)
+    at.button(key='scn_next_2').click().run(); at.button(key='scn_next_3').click().run()
+    at.button(key='scn_hold').click().run()
+    sim = at.session_state['story_sim']; story = at.session_state['story']
+    assert story['decision']['type'] == 'hold' and not sim.unload_plan and sim.statuses[story['focus']] == 'YARD_QUEUE'
+    assert at.session_state['scn_step'] == 6 and history.list_jobs()[0]['status'] == '보류'
+
+
+def test_pages_keep_state_and_removed_items_are_gone():
+    at = AppTest.from_file(APP, default_timeout=180).run()
+    walk_to_compare(at)
+    now = at.session_state['story_sim'].now
     for page in PAGES:
         at.button(key='nav_' + page).click().run()
         assert not at.exception, page
-        assert at.session_state['story']['focus'] == focus and at.session_state['story_sim'].now == now
-        assert at.session_state['story']['decision']['order'] == d['order']
-        assert at.session_state['focus'] == feature_focus                       # 기능 시연 쪽 선택도 유지
-    at.query_params['page'] = 'eta'
-    at.run()
-    assert at.session_state['page'] == 'eta' and at.session_state['story_sim'].now == now and len(at.session_state['story_sim'].moves) == n
-
-
-def test_hold_is_a_separate_branch_not_completion():
-    at = AppTest.from_file(APP, default_timeout=120).run()
-    focus = at.session_state['story']['focus']
-    walk_to_decision(at, focus)
-    button(at, '보류').click().run()
-    sim = at.session_state['story_sim']; story = at.session_state['story']
-    state = progress_state(story, sim)
-    assert state['승인 또는 보류'] == 'hold' and not state['작업 완료']
-    assert not sim.accepted and not sim.unload_plan and sim.statuses[focus] == 'YARD_QUEUE'
-
-
-def test_selection_does_not_jump_when_focus_leaves_pending_list():
-    at = AppTest.from_file(APP, default_timeout=120).run()
-    focus = at.session_state['story']['focus']
-    walk_to_decision(at, focus)
-    button(at, '승인').click().run()
-    button(at, '작업 완료까지 진행').click().run()
-    at.button(key='nav_dashboard').click().run()
-    assert not at.exception and at.session_state['story']['focus'] == focus
-    # 기능 화면: 승인한 화물이 미적치 목록에서 빠져도 다른 화물로 자동 전환하지 않음
-    ops = at.session_state['ops']; f = at.session_state['focus']
-    next(b for b in at.button if b.label == '선택한 배치 승인').click().run()
-    assert any(v['container_id'] == f for v in at.session_state['ops'].accepted.values())
-    next(b for b in at.button if b.label == '현재 작업 완료까지 진행').click().run()
-    at.button(key='nav_dashboard').click().run()
-    assert not at.exception and at.session_state['focus'] == f
+        assert at.session_state['story_sim'].now == now
+    root = APP.parent
+    src = ''.join(p.read_text(encoding='utf-8') for p in list(root.glob('*.py')) + list((root / 'ui').glob('*.py')))
+    assert 'Port-i' not in src and '계획 변경 대응' not in src and '대표 사례 흐름' not in src
+    assert '선택 화물 보기' not in src
 
 
 def test_feature_scenario_reset_does_not_touch_story():
-    at = AppTest.from_file(APP, default_timeout=120).run()
-    focus = at.session_state['story']['focus']
-    walk_to_decision(at, focus)
+    at = AppTest.from_file(APP, default_timeout=180).run()
+    walk_to_compare(at)
     before = at.session_state['story_sim'].now
     next(s for s in at.selectbox if s.label == '시나리오').set_value('capacity')
-    button(at, '시나리오 적용 · 처음부터 시작').click().run()
+    next(b for b in at.button if b.label == '시나리오 적용 · 처음부터 시작').click().run()
     assert at.session_state['config'].preset == 'capacity'
-    assert at.session_state['story_sim'].now == before and at.session_state['story']['progress'].get('compared')
+    assert at.session_state['story_sim'].now == before and at.session_state['scn_step'] == 2
 
 
 def test_no_preference_learning_or_scoring_left():

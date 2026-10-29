@@ -69,20 +69,18 @@ def _ensure_plotly_js():
 
 
 def render(fig, height, autoplay_ms=None):
-    """fig를 iframe으로 그립니다. autoplay_ms가 있으면 프레임을 자동 재생합니다."""
-    div = 'yard-' + uuid.uuid4().hex[:8]
-    _ensure_plotly_js()
-    body = fig.to_html(include_plotlyjs=False, full_html=False, div_id=div,
-                       config={'displayModeBar': False, 'scrollZoom': False, 'responsive': True},
-                       default_height=f'{height}px', default_width='100%')
-    js = _HOVER_JS % {'id': div, 'autoplay': (_AUTOPLAY % autoplay_ms) if autoplay_ms else ''}
-    page = ('<html><head><meta charset="utf-8"><script src="/app/static/plotly.min.js"></script>'
-            '<style>html,body{margin:0;background:transparent;overflow:hidden}</style></head>'
-            f'<body>{body}<script>{js}</script></body></html>')
-    st.iframe(page, height=height + 8)
+    """fig를 Streamlit 기본 차트로 그립니다.
+
+    예전에는 iframe에서 /app/static/plotly.min.js를 불러왔는데, Streamlit Cloud에서 이 파일이 404가 되어
+    적치 미리보기가 비어 보였습니다. st.plotly_chart는 Plotly.js를 Streamlit이 직접 제공하므로 배포 환경과 무관하게 그려집니다.
+    적치 과정은 차트 아래 [↺ 적치 과정 다시 보기] 버튼으로 재생합니다(autoplay_ms는 호환용으로만 받습니다).
+    """
+    fig.update_layout(height=height)
+    st.plotly_chart(fig, width='stretch', theme=None, key='yard3d-' + uuid.uuid5(uuid.NAMESPACE_OID, fig.layout.uirevision or 'x').hex[:6]
+                    + str(height), config={'displayModeBar': False, 'scrollZoom': False})
 
 
-def placement_figure(o, cid, target, height=420, focus_only=False):
+def placement_figure(o, cid, target, height=420, focus_only=False):  # focus_only는 호환용(스위치 삭제)
     """선택한 대안 위치로 컨테이너를 내려놓는 과정을 프레임으로 만듭니다(트럭 → 들어 올림 → 이동 → 내려놓기)."""
     static = _static_traces()
     k0 = len(static)

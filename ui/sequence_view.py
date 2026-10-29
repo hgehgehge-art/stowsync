@@ -13,7 +13,7 @@ from services.workflows import quadrant
 from ui.theme import html, badge, panel, table, tm
 
 LETTERS = 'ABCDEFGH'
-SOURCE_NOTE = '올컨e·Port-i·TOS 정보 연결'
+SOURCE_NOTE = '올컨e·TOS 정보 연결'
 VALID_SECONDS = 60
 # 선박별 색과 무늬: 색만으로 구분하지 않도록 무늬를 함께 씁니다.
 # 노랑은 대표 컨테이너 표시에 쓰므로 선박 색에서는 뺍니다.

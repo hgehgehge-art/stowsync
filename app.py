@@ -21,14 +21,17 @@ from ui.scene import yard_figure, replay_figure
 from ui.scene_html import render as render_3d, placement_figure
 from ui.workflows import (ensure_workflows, arrival_inputs, cargo_panel,
     record_approval, notify_demo, exceptions_page, premarshal_page, sharing_page, connections_panel)
-from ui.story_page import story_page, checklist, legend3d, trucks_at, STAGES
+from ui.story_page import legend3d, trucks_at
+from ui.scenario_page import scenario_page
+from services import history as job_history
+import uuid
 from services.story import STORY_CONFIG, start_story, replay_steps
 
 st.set_page_config(page_title='StowSync | 수출 컨테이너 통합 관제',page_icon='◈',layout='wide',initial_sidebar_state='expanded')
 inject()
 ensure_workflows()
 
-PAGES={'story':'대표 사례 흐름','dashboard':'통합 관제·배치','eta':'트럭 ETA','premarshal':'유휴시간 선작업',
+PAGES={'story':'대표 시나리오','dashboard':'통합 관제·배치','eta':'트럭 ETA','premarshal':'유휴시간 선작업',
        'exceptions':'2×2 예외 대응','sharing':'기사 안내·알림','sync':'변경·승인','impact':'정책 실험실','data':'데이터 연계'}
 ALIASES={'recommend':'dashboard'}  # 예전 'CY 배치 추천' 주소는 통합 관제·배치로 연결합니다.
 PRESET_LABELS={'balanced':'기본 운영','late_priority':'지연 도착 · 선적 상위','early_priority':'조기 도착 · 선적 상위','uncertain':'ETA 불확실성 확대','reversal':'선적계획 변경','capacity':'공간 부족','cutoff':'반입 마감 초과','early_low':'조기 도착 · 선적 하위','late_low':'지연 도착 · 선적 하위','premarshal_demo':'유휴시간 선작업 검토'}
@@ -48,7 +51,7 @@ def reset_story():
     sim,story=start_story(STORY_CONFIG)
     st.session_state.story_sim=sim
     st.session_state.story=story
-    for key in ('story_stage','story_option','story_choice','_goto_stage'):st.session_state.pop(key,None)
+    for key in ('story_stage','story_option','story_choice','_goto_stage','scn_step','scn_play','prev_alt','scn_reason','scn_special'):st.session_state.pop(key,None)
 
 def reset_operations(cfg):
     """기능별 화면(통합 관제~데이터 연계)의 시연 데이터. 명시적인 '시나리오 적용 · 처음부터 시작'에서만 호출합니다."""
@@ -69,6 +72,8 @@ if 'config' not in st.session_state or st.session_state.get('workflow_version')!
     reset_operations(FEATURE_CONFIG)
     reset_story()
     st.session_state.workflow_version=4
+# 누적 작업 이력을 새로고침 뒤에도 찾도록 브라우저 주소에 세션 ID(sid)를 둡니다.
+if not st.query_params.get('sid'):st.query_params['sid']=uuid.uuid4().hex[:10]
 # 화면 이동은 조회만 바꿉니다. URL(뒤로 가기 포함)의 page를 따라가되 시뮬레이션 상태는 건드리지 않습니다.
 _qp=ALIASES.get(st.query_params.get('page'),st.query_params.get('page'))
 if _qp in PAGES:st.session_state.page=_qp
@@ -92,18 +97,18 @@ with st.sidebar:
         if key=='impact':html('<div class="side-label">검증·연계</div>')
         st.button(PAGES[key],icon=icons[key],key='nav_'+key,type='primary' if st.session_state.page==key else 'secondary',width='stretch',on_click=navigate,args=(key,))
     if st.session_state.page=='story':
-        html('<div class="side-label">대표 사례 · 추천 변경 기준</div>')
+        html('<div class="side-label">대표 시나리오 · 추천 변경 기준</div>')
         st.slider('1순위를 바꾸는 점수 차이(J)',0,120,30,5,key='seq_margin',help='새 1순위의 점수가 이전 1순위보다 이 값 이상 좋아야 추천을 바꾸고 알림을 띄웁니다. 작은 차이로 추천이 자주 뒤집히지 않게 하는 가정값입니다.')
     html('<div class="side-label">운영 시나리오 · 40개</div>')
     with st.form('scenario_form',border=False):
         preset=st.selectbox('시나리오',list(PRESET_LABELS),format_func=lambda x:PRESET_LABELS[x],index=list(PRESET_LABELS).index(cfg.preset),label_visibility='collapsed')
-        if st.form_submit_button('시나리오 적용 · 처음부터 시작',width='stretch',help='기능별 화면의 진행 상태와 판단 기록을 지우고 선택한 시나리오를 처음부터 시작합니다. 대표 사례 흐름(20개)은 바뀌지 않습니다.'):
+        if st.form_submit_button('시나리오 적용 · 처음부터 시작',width='stretch',help='기능별 화면의 진행 상태와 판단 기록을 지우고 선택한 시나리오를 처음부터 시작합니다. 대표 시나리오(20개)는 바뀌지 않습니다.'):
             reset_operations(Config(target_count=40,occupancy=.5,preset=preset));st.rerun()
     st.toggle('캡처 모드',key='capture_mode',help='조작 안내를 줄여 기획서에 넣기 편하게 표시합니다.')
-    html('<div class="side-card"><div class="allcone-box"><b>올컨e 앱 연동</b><br>반입 예약·운송 정보를 받아 하차 순서·적치 위치를 검토하고, 승인 결과를 기사 앱으로 안내합니다.</div><p>수출 FCL · 2개 블록 · 20ft<br>대표 사례 20개 · 기능 시연 40개</p></div>')
+    html('<div class="side-card"><div class="allcone-box"><b>올컨e 앱 연동</b><br>반입 예약·운송 정보를 받아 하차 순서·적치 위치를 검토하고, 승인 결과를 기사 앱으로 안내합니다.</div><p>수출 FCL · 2개 블록 · 20ft<br>대표 시나리오 20개 · 기능 시연 40개</p></div>')
 
 page=st.session_state.page
-# 대표 사례 흐름은 20개 사례 데이터, 나머지 기능 화면은 기능 시연 데이터(40개)를 씁니다.
+# 대표 시나리오는 20개 사례 데이터, 나머지 기능 화면은 기능 시연 데이터(40개)를 씁니다.
 sim=st.session_state.story_sim if page=='story' else st.session_state.ops
 o=sim.observe();cfg=st.session_state.config
 with st.spinner('동일 조건의 비교 결과를 계산하고 있습니다…'):
@@ -113,12 +118,10 @@ title=PAGES[page]
 html(f'<div class="page-head"><div><h1>{title}</h1></div><div class="head-right"><div class="head-time">{tm(o.now)}<span style="font-size:13px;color:#7892a8"> KST</span></div><div class="head-date">2026.10.12</div></div></div>')
 
 def source_strip():
-    html('<div class="source-strip"><span class="src-allcone"><b>올컨e 앱</b><em>반입 예약·운송 정보</em></span><span class="arrow">→</span><span><b>Port-i</b><em>선박 일정</em></span><span class="arrow">→</span><span><b>TOS</b><em>야드·선적계획</em></span><span class="arrow">→</span><span class="teal">StowSync 의사결정</span></div>')
+    html('<div class="source-strip"><span class="src-allcone"><b>올컨e 앱</b><em>반입 예약·운송 정보</em></span><span class="arrow">→</span><span><b>TOS</b><em>야드·선박·선적계획</em></span><span class="arrow">→</span><span class="teal">StowSync 의사결정</span></div>')
 
 def chart(fig,key): st.plotly_chart(fig,width='stretch',theme=None,key=key,config={'displayModeBar':False,'scrollZoom':False})
 
-def focus_toggle():
-    return st.toggle('선택 화물 보기(나머지는 흐리게)',key='focus_only',help='가려진 대표 컨테이너를 확인할 수 있도록 다른 스택을 흐리게 표시합니다.')
 
 def cargo_word(cid):
     c=o.containers[cid]
@@ -259,7 +262,7 @@ def dashboard():
     with left:
         with st.container(key='canvas'):
             panel('적치 미리보기',subtitle=f'{cid} → {slot(chosen.stack,chosen.tier)} · 컨테이너에 커서를 올리면 강조됩니다')
-            render_3d(placement_figure(o,cid,(chosen.stack,chosen.tier),height=420,focus_only=focus_toggle()),420,autoplay_ms=110);legend()
+            render_3d(placement_figure(o,cid,(chosen.stack,chosen.tier),height=420),420,autoplay_ms=110);legend()
     with right:
         with st.container(key='review'):
             panel('현장 관리자 검토')
@@ -271,10 +274,17 @@ def dashboard():
                 report=sim.approve(rec,selected_index)
                 if report.valid:
                     record_approval(sim,rec,selected_index,reason)
+                    job_history.add({'sid':st.query_params.get('sid','local'),'sim_time':tm(sim.now),'source':'통합 관제·배치','container':cid,
+                        'compared':[{'대안':f'대안 {i+1}','위치':slot(c.stack,c.tier),'예상 재취급':round(c.rehandles,2),'추가 이동 작업시간(분)':round(c.extra_seconds/60,1)} for i,c in enumerate(options)],
+                        'approved':f'대안 {selected_index+1} · {slot(chosen.stack,chosen.tier)}','order_text':f'{cid} 단독 하차','total_min':round(chosen.extra_seconds/60,2),
+                        'base_total_min':round(options[0].extra_seconds/60,2),'saved_min':round((options[0].extra_seconds-chosen.extra_seconds)/60,2),
+                        'reason':('' if reason=='선택 안 함' else reason+' · ')+('추천 1위' if selected_index==0 else f'추천 {selected_index+1}위(담당자 선택)')+f' · 예상 재취급 {chosen.rehandles:.2f}회',
+                        'status':'승인(작업 대기)','detail':{'추천ID':rec.recommendation_id,'계획 버전':rec.plan_version}})
                     st.session_state.review_log.append({'시각':tm(sim.now),'컨테이너':cid,'결정':'승인','위치':slot(chosen.stack,chosen.tier),'사유':reason,'추천ID':rec.recommendation_id})
                     st.session_state.pop('active_recommendation',None);goto('sync')
                 else:st.error(' · '.join(report.errors))
             if st.button('추천 보류',width='stretch',disabled=cid in st.session_state.held):
+                job_history.add({'sid':st.query_params.get('sid','local'),'sim_time':tm(sim.now),'source':'통합 관제·배치','container':cid,'approved':'— (보류)','order_text':'—','reason':reason,'status':'보류'})
                 st.session_state.held.add(cid);st.session_state.review_log.append({'시각':tm(sim.now),'컨테이너':cid,'결정':'보류','위치':'—','사유':reason,'추천ID':rec.recommendation_id});goto('sync')
             if not can_approve:st.caption('승인하려면 CY 도착, 크레인 가용, 화물 확인, 보류 해제가 필요합니다.')
             html(f'<div class="allcone-box">승인하면 {allcone("올컨e 앱")} 기사 화면에 하차 블록 <b>{escape(chosen.stack.split("-")[0])}</b> 안내가 생성됩니다.</div>')
@@ -362,13 +372,15 @@ def sync_page():
             if st.session_state.held and st.button('보류 해제 후 재검토',width='stretch'):
                 st.session_state.focus=sorted(st.session_state.held)[0];st.session_state.held.clear();goto('dashboard')
             if st.button('기사 안내·알림 열기',width='stretch'):goto('sharing')
+            if st.button('누적 작업 이력 보기',width='stretch',key='sync_history'):
+                st.session_state.scn_step=6;goto('story')
             html(f'<div class="allcone-box">승인한 하차 블록은 {allcone("올컨e 앱")} 기사 안내로 연결됩니다.</div>')
     if st.session_state.review_log:
         st.download_button('판단 이력 CSV',csv_bytes(st.session_state.review_log),'stowsync_decisions.csv','text/csv',icon=':material/download:')
 
 def impact_page():
     source_strip();a=results['A'].metrics;b=results['B'].metrics;c=results['C'].metrics
-    html('<div class="section-note"><strong>별도 자동 실험</strong> · 같은 사건(40개 화물)에 세 정책을 자동으로 적용한 결과입니다. 대표 사례에서 승인한 작업의 결과는 대표 사례 흐름 ⑦ 결과 확인에서 봅니다.</div>')
+    html('<div class="section-note"><strong>별도 자동 실험</strong> · 같은 사건(40개 화물)에 세 정책을 자동으로 적용한 결과입니다. 대표 시나리오에서 승인한 작업의 결과는 대표 시나리오의 결과 확인 단계에서 봅니다.</div>')
     complete=all(results[p].metrics['incomplete']==0 for p in 'ABC')
     gain=(a['extra_moves']-c['extra_moves'])/a['extra_moves']*100 if a['extra_moves'] else None
     cs=st.columns(4)
@@ -409,7 +421,7 @@ def impact_page():
 def data_page():
     source_strip()
     connections_panel(sim)
-    html(f'<div class="allcone-box">{allcone("올컨e 앱")} 반입 예약·운송 진행 정보 → Port-i 선박 일정 → TOS 야드·작업계획 순으로 연결해 하차 순서·적치 위치를 판단합니다.</div>')
+    html(f'<div class="allcone-box">{allcone("올컨e 앱")} 반입 예약·운송 진행 정보 → TOS 야드·선박·작업계획 순으로 연결해 하차 순서·적치 위치를 판단합니다.</div>')
     with st.container(key='arrival-evidence'):
         panel('VBS 매뉴얼에서 확인한 예약·도착 기능','공개자료 확인 · 2022 화면 예시')
         table(['구분','매뉴얼에서 확인되는 내용','기획상 의미'],[
@@ -420,7 +432,7 @@ def data_page():
             ['게이트·야드 안내','게이트 1km 지점에서 예약 준수 판정 예시, 진입 후 장치장·블록 위치 표시','공개 화면만으로 실시간 TOS 장치계획 연계를 단정할 수 없음'],
         ])
         html('<div class="section-note"><strong>해석</strong> · 매뉴얼은 예약시각 조정과 운송 중 위치·도착 상태 안내가 있음을 보여줍니다. 다만 2022년 화면 예시이므로 현재 운영 여부·세부 간격·터미널별 설정은 재확인해야 합니다. 이 공개자료만으로 외부 API 제공 범위나 개별 컨테이너 ETA가 TOS의 최초 적치·선작업 계획에 자동 반영되는지는 확인할 수 없습니다. StowSync의 제안은 기존 정보를 새로 만드는 것이 아니라, 그 정보와 TOS 작업계획의 연결 수준을 조사하고, 부족한 연결·예측·비교 기능을 보완하는 것입니다.</div>')
-    infos=[('01 반입','올컨e 앱 · VBS','반입 예약, 출발 및 운송 진행 정보','예약·진행 상태 제공 범위와 권한 협의'),('02 선박','Port-i','선박 일정과 변경 정보','개별 컨테이너 선적 순서는 TOS에서 수신'),('03 야드','터미널 TOS','적치 위치, 인출 순서, 장비 작업 이력','읽기 전용 검증 후 승인 작업 연계')]
+    infos=[('01 반입','올컨e 앱 · VBS','반입 예약, 출발 및 운송 진행 정보','예약·진행 상태 제공 범위와 권한 협의'),('02 선박','선박 일정(TOS)','선박 작업 시간대와 변경 정보','개별 컨테이너 선적 순서와 함께 터미널 TOS에서 수신'),('03 야드','터미널 TOS','적치 위치, 인출 순서, 장비 작업 이력','읽기 전용 검증 후 승인 작업 연계')]
     for col,(num,name,detail,note) in zip(st.columns(3),infos):
         with col:html(f'<div class="integration{" allcone-int" if "올컨e" in name else ""}"><div class="num">{num}</div><h3>{name}</h3>{badge("연계 준비","amber")}<p>{detail}</p><div class="small-note">{note}</div></div>')
     html('<div class="steps"><div class="step active">01 입력 정합성<small>ID · 시각 · 계획 버전</small></div><div class="step active">02 도착 예측<small>중앙값 · 불확실성 구간</small></div><div class="step active">03 제약 기반 탐색<small>위치 · 하중 · 장비</small></div><div class="step active">04 승인 및 결과<small>판단 사유 · 실제 이동</small></div></div>')
@@ -440,10 +452,10 @@ def data_page():
     with right:
         st.download_button('설정·가정 JSON',json.dumps({'data_mode':'synthetic','config':cfg.model_dump()},ensure_ascii=False,indent=2),'stowsync_config.json','application/json',width='stretch',icon=':material/download:')
     with st.expander('기획 근거 자료'):
-        st.markdown('- [올컨e 공식 매뉴얼](https://www.chainportal.co.kr/manual/download?filename=ChainPortal_APP_Manual.pdf)\n- [BPA Port-i 서비스 소개](https://busanpa.com/board/view.do?boardId=BBS_0000031&dataSid=34863&menuCd=DOM_000000105002001000)\n- [도착 불확실성을 고려한 배치 연구](https://research.utwente.nl/en/publications/approximate-dynamic-programming-for-container-stacking/)')
+        st.markdown('- [올컨e 공식 매뉴얼](https://www.chainportal.co.kr/manual/download?filename=ChainPortal_APP_Manual.pdf)\n- [도착 불확실성을 고려한 배치 연구](https://research.utwente.nl/en/publications/approximate-dynamic-programming-for-container-stacking/)')
     
 
-{'story':lambda:story_page(sim,st.session_state.story,goto,reset_story),'dashboard':dashboard,'eta':eta_page,'sync':sync_page,'impact':impact_page,'data':data_page,
+{'story':lambda:scenario_page(sim,st.session_state.story,goto,reset_story),'dashboard':dashboard,'eta':eta_page,'sync':sync_page,'impact':impact_page,'data':data_page,
  'exceptions':lambda:exceptions_page(sim,choose_container,chart,goto),
  'premarshal':lambda:premarshal_page(sim,chart,reset_operations,goto),
  'sharing':lambda:sharing_page(sim)}[page]()
