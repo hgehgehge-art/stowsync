@@ -262,6 +262,7 @@ def stage_sequence(sim, story, goto):
     left, right = st.columns([1.1, 1], gap='medium')
     with left:
         pick = order_cards(sim, res, focus)
+        sensitivity_panel(sim, story, res)
         if st.button('대안 비교 완료 → 승인 단계로', type='primary', width='stretch', disabled=bool(story['progress'].get('compared'))):
             story['progress']['compared'] = tm(sim.now); goto_stage(4)
     with right:
@@ -340,3 +341,34 @@ def stage_decide_order(sim, story, reasons_list, log_decision):
         st.session_state.seq_running = False
         st.rerun()
     st.caption('승인하면 순서와 위치가 모의 장비 작업 계획에 한 번만 올라갑니다. 실제 TOS 지시나 기사 알림은 보내지 않습니다.')
+
+
+# ── 민감도 ─────────────────────────────────────────────
+def sensitivity_panel(sim, story, res):
+    """가중치·표본 수를 바꿔도 1순위가 유지되는지 확인합니다. 버튼을 눌렀을 때만 계산합니다."""
+    if not res['options']:
+        return
+    focus = story['focus']
+    block = sim.bundle.containers[focus].block
+    labels = label_map(res)
+    with st.expander('가정이 바뀌면 1순위도 바뀔까? (민감도)'):
+        st.caption('대기(E) 1에 대한 지연 T 가중치 0.25·0.5·1, 인출 지연 D 가중치 1·2·4, 가로막힘 B 가중치 30·60·120, '
+                   '도착 표본 8·16·32개를 모두 조합(81가지)해 상위 10개 순서 중 1위가 무엇인지 다시 셉니다.')
+        key = seq.cache_key(sim, block)
+        if st.button('민감도 계산', key='seq_sens', width='stretch'):
+            story['seq_sens'] = (key, seq.sensitivity(sim, block, {focus: story['planned']}))
+        got = story.get('seq_sens')
+        if not got or got[0] != key:
+            return
+        s = got[1]
+        top = order_text(s['top'], labels)
+        html(f'<div class="why"><b>{s["same"]}/{s["total"]}개 조합</b>에서 1순위가 기본 설정과 같은 <b>{top}</b>였습니다. '
+             f'<span class="muted">계산 {s["ms"]}ms</span></div>')
+        if s['changes']:
+            from collections import Counter
+            cnt = Counter(order_text(c['top'], labels) for c in s['changes'])
+            table(['다른 1순위', '조합 수', '예시 조건'],
+                  [[o, n, escape(next(f'T {c["T"]} · D {c["D"]} · B {c["B"]:.0f} · 표본 {c["S"]}' for c in s['changes']
+                                      if order_text(c['top'], labels) == o))] for o, n in cnt.most_common()])
+        st.caption('가중치는 정책 판단이 담긴 가정값이며 현장 자료로 보정하지 않았습니다. 이 결과는 이 사례(합성 데이터) 한 장면에 대한 계산이고, '
+                   '어떤 가중치가 옳은지 알려 주지 않습니다.')
