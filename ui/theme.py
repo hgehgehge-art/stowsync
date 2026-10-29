@@ -194,5 +194,14 @@ CSS = CSS.replace('</style>', '''
 .opt-what{font-size:12px;color:#cfe0ee;margin-top:5px;}.opt-why{font-size:11.5px;color:#93a9bd;margin-top:3px;}
 .opt-nums{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:11.5px;color:#9fb3c6;margin-top:6px;}.opt-nums b{color:#f1f6fb;}
 .st-key-focus .app-table td{white-space:normal;line-height:1.55;}
+.src-card{border:1px solid #2a3c52;border-left:4px solid var(--src);border-radius:10px;background:#0f1b2a;padding:9px 12px 8px;margin:8px 0;}
+.src-head{display:flex;align-items:baseline;gap:8px;margin-bottom:5px;}
+.src-head b{color:var(--src);font-size:13px;letter-spacing:.2px;}
+.src-head span{color:#9fb3c6;font-size:11px;}
+.src-head em{margin-left:auto;font-style:normal;font-size:9.5px;color:#7f97ad;border:1px solid #33475d;border-radius:4px;padding:1px 6px;}
+.src-row{display:flex;justify-content:space-between;gap:12px;font-size:12px;padding:3px 0;border-top:1px solid #1f2f42;color:#9fb3c6;}
+.src-row b{color:#eaf2f9;font-weight:600;text-align:right;}
+.src-note{font-size:11px;color:#8ea3b6;margin-top:5px;line-height:1.55;}
+.src-tag{font-style:normal;font-size:9px;color:var(--src);border:1px solid var(--src);border-radius:4px;padding:0 4px;margin-left:3px;opacity:.9;}
 .app-table .good{color:#59e0ce;font-weight:600;}.app-table .bad{color:#ee99a4;font-weight:600;}
 </style>''')

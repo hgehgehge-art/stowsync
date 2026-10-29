@@ -19,6 +19,22 @@ REASONS = ['선택 안 함', '추천 근거와 현장 조건 일치', '장비 �
 SCOPE = '평가 범위: 야드 전체(블록 A1·B1) · 앞으로 60분 · 가능한 도착 상황 {n}가지를 가정한 예상 평균'
 
 
+SOURCES = {'allcone': ('올컨e', '반입 예약·운송 진행', '#2EC4A6'), 'porti': ('Port-i', '선박 일정 · 부산항만공사', '#4C8DF0'),
+           'tos': ('TOS', '야드·선적 작업계획', '#A78BFA'), 'stowsync': ('StowSync', '연결해서 계산한 판단', '#FFD12E')}
+
+
+def source_card(key, rows, note=''):
+    name, sub, color = SOURCES[key]
+    body = ''.join(f'<div class="src-row"><span>{escape(k)}</span><b>{escape(str(v))}</b></div>' for k, v in rows)
+    html(f'<div class="src-card" style="--src:{color}"><div class="src-head"><b>{name}</b><span>{sub}</span>'
+         f'<em>모의 · 연계 협의 필요</em></div>{body}' + (f'<div class="src-note">{escape(note)}</div>' if note else '') + '</div>')
+
+
+def src_tag(key):
+    name, _, color = SOURCES[key]
+    return f'<i class="src-tag" style="--src:{color}">{name}</i>'
+
+
 def cargo_text(c):
     if c.cargo_type == '위험물':
         return f'⚠ 위험물 {c.hazard_class}'
@@ -56,8 +72,9 @@ def summary_bar(sim, story, cid):
     cells = [('컨테이너', cid), ('화물', cargo_text(c)), ('현재 상태', STATUS.get(sim.statuses[cid], sim.statuses[cid])),
              ('예약 구간', f'{tm(c.booking_start)}–{tm(c.booking_end)}'), ('ETA 구간' if sim.statuses[cid] == 'EN_ROUTE' else '게이트 도착(ATA)', eta),
              ('선적 우선순위', f'#{p.sequence} / {len(o.plan)} · {top}' if p else '미정'), ('위치', where)]
+    tags = {'예약 구간': 'allcone', 'ETA 구간': 'allcone', '게이트 도착(ATA)': 'allcone', '선적 우선순위': 'tos', '위치': 'tos', '현재 상태': 'tos'}
     html('<div class="case-bar"><div class="case-tag">대표 컨테이너</div>' +
-         ''.join(f'<div><span>{k}</span><b>{escape(str(v))}</b></div>' for k, v in cells) + '</div>')
+         ''.join(f'<div><span>{k} {src_tag(tags[k]) if k in tags else ""}</span><b>{escape(str(v))}</b></div>' for k, v in cells) + '</div>')
 
 
 def checklist(sim, story):
@@ -199,12 +216,16 @@ def stage_situation(sim, story, rec_info, goto):
         yard = f'CY 하차 가능 예상 {tm(y[0])}–{tm(y[2])} (게이트 처리·내부 이동 {times["lag"] // 60}분 뒤)'
     else:
         gate = yard = '정보 없음'
-    rows = [['예약 구간', f'{tm(c.booking_start)}–{tm(c.booking_end)}'], ['도착', gate], ['하차', yard],
-            ['선적 순서', f'#{o.plan[cid].sequence} (먼저 실을수록 앞 번호)'], ['기존 계획 위치', f'{story["planned"]} · {tm(story["planned_at"])}에 예약시각 기준으로 정함']]
-    table(['항목', '내용'], rows)
-    if log:
-        hist = ' → '.join(f'{tm(f.observed_at)} 발행 {tm(f.p50)}' for f in log[-3:])
-        html(f'<div class="section-note"><b>ETA 변화</b> · {hist}</div>')
+    v = sim.bundle.vessels[c.vessel_id]
+    hist = ' → '.join(f'{tm(f.observed_at)} {tm(f.p50)}' for f in log[-3:]) if log else '갱신 없음'
+    source_card('allcone', [('반입 예약', f'{tm(c.booking_start)}–{tm(c.booking_end)}'), ('트럭 상태', STATUS[sim.statuses[cid]]),
+                            ('도착 예상(갱신 시각 → ETA)', hist), ('게이트 도착', gate.replace('게이트 도착 ', ''))])
+    source_card('porti', [('선박', f'{c.vessel_id} · 터미널 {v["terminal"]}(가상)'), ('접안 예정', tm(v.get('eta', 1800))),
+                          ('반입 마감', tm(v['gate_cutoff']))], '선석 일정만으로는 개별 컨테이너의 선적 순서를 알 수 없어 TOS 작업계획과 함께 봅니다.')
+    first_due = min(p.due for p in o.plan.values())
+    source_card('tos', [('작업계획', f'{sim.plan_version} · 본선 인출 시작 {tm(first_due)}'), ('대표 컨테이너 인출 순서', f'#{o.plan[cid].sequence} / {len(o.plan)} (선적 상위)'),
+                        ('기존 계획 위치', f'{story["planned"]} · {tm(story["planned_at"])}에 예약시각 기준으로 정함')])
+    source_card('stowsync', [('CY 하차 가능(계산)', yard.replace('CY 하차 가능 ', ''))], '세 시스템의 정보를 연결해 하차 가능 시점과 기존 계획의 문제를 계산합니다.')
     late = None
     f = o.forecasts.get(cid)
     if f and sim.statuses[cid] == 'EN_ROUTE':
@@ -394,6 +415,9 @@ def stage_execute(sim, story, rec_info, goto):
                            ['현재 위치', slot(*locate(sim.yard, cid)) if locate(sim.yard, cid) else STATUS[sim.statuses[cid]]],
                            ['기사 안내(미리보기)', f'{story["guide"]["at"]} · {story["guide"]["lane"]} 하차 지점 안내 생성' if story.get('guide') else '—'],
                            ['시뮬레이션 시각', tm(sim.now)]])
+    if story.get('guide'):
+        source_card('allcone', [('기사 안내', f'{story["guide"]["lane"]}로 진입해 주세요'), ('발행', story['guide']['at']),
+                                ('컨테이너', cid)], '기사 화면에는 하차 지점(블록)만 보이고, 적치 슬롯 번호와 야드 전체 정보는 보이지 않습니다.')
     if st.button('작업 완료까지 진행', type='primary', width='stretch', disabled=acc == 'COMPLETED'):
         advance_until(sim, lambda: sim.accepted.get(d['rec_id'], {}).get('status') == 'COMPLETED'); st.rerun()
     if st.button(f'{cid} 본선 인출까지 진행', width='stretch', disabled=sim.statuses[cid] == 'RETRIEVED' or acc != 'COMPLETED',
