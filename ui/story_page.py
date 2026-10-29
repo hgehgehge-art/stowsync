@@ -21,8 +21,8 @@ REASONS = ['선택 안 함', '추천 근거와 현장 조건 일치', '장비 �
 SCOPE = '평가 범위: 야드 전체(블록 A1·B1) · 앞으로 60분 · 가능한 도착 상황 {n}가지를 가정한 예상 평균'
 
 
-SOURCES = {'allcone': ('올컨e', '반입 예약·운송 진행', '#2EC4A6'), 'porti': ('Port-i', '선박 일정 · 부산항만공사', '#4C8DF0'),
-           'tos': ('TOS', '야드·선적 작업계획', '#A78BFA'), 'stowsync': ('StowSync', '연결해서 계산한 판단', '#FFD12E')}
+SOURCES = {'allcone': ('올컨e', '반입 예약·운송 진행', '#0F7B66'), 'porti': ('Port-i', '선박 일정 · 부산항만공사', '#1F5FBF'),
+           'tos': ('TOS', '야드·선적 작업계획', '#6D4BC4'), 'stowsync': ('StowSync', '연결해서 계산한 판단', '#B4532A')}
 
 
 def source_card(key, rows, note=''):
@@ -47,8 +47,8 @@ def cargo_text(c):
 
 def legend3d():
     items = ''.join(f'<span><i style="background:{c};{"opacity:.55" if "반투명" in t else ""}"></i>{t}</span>' for t, c in LEGEND)
-    html(f'<div class="legend3d">{items}<span><i style="background:transparent;border:2px solid #FFB547"></i>기존 계획 위치</span>'
-         '<span><b style="color:#fff">→</b> 승인된 이동 경로</span><span><b>⚠</b> 위험물(색과 무관)</span></div>')
+    html(f'<div class="legend3d">{items}<span><i style="background:transparent;border:2px solid #2A3449"></i>기존 계획 위치(남색 테두리)</span>'
+         '<span><b style="color:#2A3449">→</b> 승인된 이동 경로</span><span><b>⚠</b> 위험물(색과 무관)</span></div>')
 
 
 def chart(fig, key):
@@ -197,7 +197,7 @@ def render_canvas(sim, story, idx, rec_info):
         target = (d['stack'], d['tier'])
     chart(yard_figure(o, cid, target, 440, focus_only, planned_mark, arrow, extra), 'yard3d_story')
     if sim.statuses[cid] == 'EN_ROUTE':
-        st.caption('대표 컨테이너는 아직 운송 중이라 야드에 그리지 않고 반입 대기 영역에 미리 표시했습니다. 주황 테두리는 기존 계획 위치입니다.')
+        st.caption('대표 컨테이너는 아직 운송 중이라 야드에 그리지 않고 반입 대기 영역에 미리 표시했습니다. 남색 테두리는 기존 계획 위치입니다.')
 
 
 def trucks_at(sim):
@@ -421,7 +421,8 @@ def stage_execute(sim, story, rec_info, goto):
         html('<div class="why">보류했기 때문에 실행할 작업이 없습니다.</div>'); return
     if d.get('kind') == 'order':
         done = order_done(sim, d['order'])
-        acc = 'COMPLETED' if done else 'EXECUTING'
+        started = any(m['move_type'] == 'INITIAL' and m['container_id'] in d['order'] for m in sim.moves)
+        acc = 'COMPLETED' if done else 'EXECUTING' if started else 'QUEUED'
         rows = []
         for c, dst in d['plan']:
             pos = locate(sim.yard, c)
@@ -543,7 +544,7 @@ def history(sim, story):
 
 # ── ⓪ 관제 ─────────────────────────────────────────────
 def render_overview(sim, story):
-    panel('20개 화물 도착 현황', 'ARRIVAL BOARD', '회색 막대 = 반입 예약 구간 · 점 = 최신 ETA(운송 중) 또는 실제 도착 · 노랑 = 대표 컨테이너')
+    panel('20개 화물 도착 현황', 'ARRIVAL BOARD', '회색 막대 = 반입 예약 구간 · 점 = 최신 ETA(운송 중) 또는 실제 도착 · 주황 = 대표 컨테이너')
     rows = review_queue(sim)
     o = sim.observe()
     fig = go.Figure()
@@ -552,20 +553,20 @@ def render_overview(sim, story):
         y = f'…{r["cid"][-4:]} · #{r["seq"]}'
         hl = r['cid'] == story['focus']
         fig.add_trace(go.Scatter(x=[r['booking'][0] / 60, r['booking'][1] / 60], y=[y, y], mode='lines',
-                                 line=dict(color='#FFD12E' if hl else '#3d536e', width=12), showlegend=False,
+                                 line=dict(color='#ED6B2C' if hl else '#CFCFD6', width=12), showlegend=False,
                                  hovertemplate=f'{r["cid"]} 예약 {tm(r["booking"][0])}–{tm(r["booking"][1])}<extra></extra>'))
         if r['ref'] is not None:
             late = (r['dev'] or 0) > 0
             fig.add_trace(go.Scatter(x=[r['ref'] / 60], y=[y], mode='markers', showlegend=False,
                                      marker=dict(size=13 if hl else 10, symbol='circle' if r['kind'] == 'ETA' else 'diamond',
-                                                 color='#E0474C' if late else '#64d8c5', line=dict(color='#05080D', width=1.5)),
+                                                 color='#D7263D' if late else '#3C3E90', line=dict(color='#FFFFFF', width=1.5)),
                                      hovertemplate=f'{r["cid"]} {r["kind"]} {tm(r["ref"])}<extra></extra>'))
-    fig.add_vline(x=sim.now / 60, line_dash='dot', line_color='#e6b877', annotation_text=f'현재 {tm(sim.now)}', annotation_font_color='#e6b877')
+    fig.add_vline(x=sim.now / 60, line_dash='dot', line_color='#C06443', annotation_text=f'현재 {tm(sim.now)}', annotation_font_color='#B4532A')
     ticks = list(range(0, 181, 15))
-    fig.update_xaxes(tickvals=ticks, ticktext=[tm(t * 60) for t in ticks], gridcolor='#25384b', tickfont_size=10)
-    fig.update_yaxes(autorange='reversed', gridcolor='#25384b', tickfont=dict(size=11))
+    fig.update_xaxes(tickvals=ticks, ticktext=[tm(t * 60) for t in ticks], gridcolor='#E2E2E7', tickfont_size=10)
+    fig.update_yaxes(autorange='reversed', gridcolor='#E2E2E7', tickfont=dict(size=11))
     fig.update_layout(height=420, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(l=96, r=10, t=10, b=30),
-                      font=dict(color='#a8bdd0'))
+                      font=dict(color='#424242'))
     chart(fig, 'overview_board')
     n_init = sum(c.initial for c in o.containers.values())
     st.caption(f'전체 {len(o.containers)}개 중 {n_init}개는 이미 야드에 있고, {len(o.containers) - n_init}개가 반입 예정입니다. '

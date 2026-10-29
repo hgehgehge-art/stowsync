@@ -1,17 +1,19 @@
 """3D 야드 장면과 작업 재생.
 
 색 의미(모든 화면 공통)
-  파랑  일반 적치 화물
+  남색  일반 적치 화물
   빨강  현재 인출 순서를 방해하는 화물(위험물 표시가 아닙니다)
-  노랑  선택한 대표 컨테이너(+ '선택한 컨테이너' 라벨, 굵은 테두리)
+  주황  선택한 대표 컨테이너(+ '선택한 컨테이너' 라벨, 굵은 테두리)
   반투명 초록  추천 목적 위치
   화살표 + 라벨  승인된 이동 경로와 현재 이동 대상
-모든 컨테이너는 검정 외곽선을 그립니다. 위험물은 색이 아니라 '⚠ 위험물' 문자로 표시합니다.
+모든 컨테이너는 흰 외곽선을 그립니다. 기존 계획 위치는 진한 남색 테두리입니다. 위험물은 색이 아니라 '⚠ 위험물' 문자로 표시합니다.
 """
 import plotly.graph_objects as go
 from engine.yard import blockers, rank, locate
 
-BLUE = '#4A7FD4'; RED = '#E0474C'; YELLOW = '#FFD12E'; GREEN = '#3DDC97'; CHASSIS = '#3B4654'; FADE = '#7D8EA3'
+# 주황·흰 테마: 일반=남보라(#3C3E90), 방해=빨강, 대표=주황(#ED6B2C), 추천=초록(반투명)
+BLUE = '#3C3E90'; RED = '#D7263D'; YELLOW = '#ED6B2C'; GREEN = '#1E9E6A'; CHASSIS = '#9AA0AC'; FADE = '#C9CCD6'
+INK = '#2A3449'
 DX, DY, DZ, PITCH = 2.02, .9, .52, .57
 TRUCK_Y = -2.45
 VESSEL_Y = 5.2
@@ -172,33 +174,33 @@ def scene_traces(containers, plan, yard, statuses=None, focus=None, target=None,
         # 화살촉
         arrow_segments += [((bx, by, bz), (bx - .25 * (1 if bx >= ax else -1), by - .25, bz + .25)),
                            ((bx, by, bz), (bx + .25 * (1 if bx >= ax else -1), by - .25, bz + .25))]
-    return [solid.trace(1), ghost.trace(.42), fade.trace(.14), _lines(edges, '#05080D', 2.5),
+    return [solid.trace(1), ghost.trace(.42), fade.trace(.14), _lines(edges, '#FFFFFF', 2.5),
             _lines(focus_edges, YELLOW, 9), go.Scatter3d(x=lx or [None], y=ly or [None], z=lz or [None], mode='text',
-                                                          text=lt or [''], textfont=dict(size=12, color='#F4F7FB'),
+                                                          text=lt or [''], textfont=dict(size=12, color=INK),
                                                           hoverinfo='skip', showlegend=False),
-            _lines(arrow_segments, '#FFFFFF', 7), _lines(plan_marks, '#FFB547', 4)]
+            _lines(arrow_segments, INK, 7), _lines(plan_marks, INK, 4)]
 
 
 def _static_traces():
     out = [go.Mesh3d(x=[-.8, 11.3, 11.3, -.8], y=[-4.2, -4.2, 5.9, 5.9], z=[-.2] * 4, i=[0, 0], j=[1, 2], k=[2, 3],
-                     color='#13283a', opacity=1, hoverinfo='skip', showscale=False)]
+                     color='#EEEEEE', opacity=1, hoverinfo='skip', showscale=False)]
     for x in [-.35, 4.65, 5.85, 10.85]:
-        out.append(go.Scatter3d(x=[x, x], y=[-.5, 3.5], z=[-.06, -.06], mode='lines', line=dict(color='#3a5a6a', width=3),
+        out.append(go.Scatter3d(x=[x, x], y=[-.5, 3.5], z=[-.06, -.06], mode='lines', line=dict(color='#CFCFD6', width=3),
                                 hoverinfo='skip', showlegend=False))
     for offset in [0, 6.2]:
         x = offset + 3.4
         out.append(go.Scatter3d(x=[x, x, x, x], y=[-.4, -.4, 3.5, 3.5], z=[0, 3, 3, 0], mode='lines',
-                                line=dict(color='#6a8598', width=6), hoverinfo='skip', showlegend=False))
+                                line=dict(color='#9AA0AC', width=6), hoverinfo='skip', showlegend=False))
     out.append(go.Scatter3d(x=[2.1, 8.3, 2.1, 8.3, 5.2], y=[-.9, -.9, TRUCK_Y - 1.4, TRUCK_Y - 1.4, VESSEL_Y],
                             z=[0, 0, 0, 0, 0], mode='text',
                             text=['BLOCK A1', 'BLOCK B1', '반입 대기(트럭)', '반입 대기(트럭)', '본선 방향 →'],
-                            textfont=dict(size=12, color='#c2d7e6'), hoverinfo='skip', showlegend=False))
+                            textfont=dict(size=12, color='#424242'), hoverinfo='skip', showlegend=False))
     return out
 
 
 def _layout(fig, height):
     fig.update_layout(height=height, paper_bgcolor='rgba(0,0,0,0)', margin=dict(l=0, r=0, t=36, b=0), showlegend=False,
-                      title=dict(text='', font=dict(size=14, color='#eaf3fb'), x=.01, y=.98),
+                      title=dict(text='', font=dict(size=14, color=INK), x=.01, y=.98),
                       scene=dict(bgcolor='rgba(0,0,0,0)', xaxis=dict(visible=False, range=[-.9, 11.4]),
                                  yaxis=dict(visible=False, range=[-4.3, 6]), zaxis=dict(visible=False, range=[-.25, 3.6]),
                                  aspectmode='manual', aspectratio=dict(x=2.4, y=2.0, z=.75),
@@ -292,14 +294,14 @@ def replay_figure(bundle, plan, steps, final_yard, focus, trucks_at, height=470,
                                mode='immediate')])
     fig.update_layout(
         updatemenus=[dict(type='buttons', direction='right', x=0, y=-.02, xanchor='left', yanchor='top', showactive=False,
-                          bgcolor='#1b2c40', bordercolor='#36506b', font=dict(color='#eaf3fb', size=12),
+                          bgcolor='#F5F5F7', bordercolor='#CFCFD6', font=dict(color=INK, size=12),
                           buttons=[play(900, '▶ 재생'),
                                    dict(label='⏸ 일시정지', method='animate',
                                         args=[[None], dict(frame=dict(duration=0, redraw=False), mode='immediate')]),
                                    play(1800, '0.5×'), play(450, '2×'), play(900, '↺ 다시 보기', True)])],
         sliders=[dict(active=0, x=.36, y=-.02, len=.64, xanchor='left', yanchor='top', pad=dict(t=0, b=0),
-                      currentvalue=dict(prefix='장면 ', font=dict(color='#a8bdd0', size=11)),
-                      font=dict(color='#a8bdd0', size=9), bgcolor='#24384d', activebgcolor='#59e0ce',
+                      currentvalue=dict(prefix='장면 ', font=dict(color='#424242', size=11)),
+                      font=dict(color='#424242', size=9), bgcolor='#EEEEEE', activebgcolor='#ED6B2C',
                       steps=[dict(label=nm.split('-')[0] if nm.endswith('이동 전') else '', method='animate',
                                   args=[[nm], dict(mode='immediate', frame=dict(duration=0, redraw=True), transition=dict(duration=0))])
                              for nm in names])],

@@ -79,11 +79,11 @@ def arrival_inputs(sim,cid):
                 sim.forecasts[cid]=predicted;sim.eta_overrides.add(cid);sim.yard_version+=1
                 st.session_state.eta_inputs[cid]={'booking':booking,'consent':consent,'remaining':remaining,'age':age,'traffic':traffic,'history_mode':history_mode,'evidence':evidence}
                 st.session_state.pop('active_recommendation',None)
-                notify_demo(sim,'도착 예측 갱신',f'{cid} · ETA {tm(predicted.p50)} · 모의 신뢰 점수 {predicted.trust_score}%',('플래너','관제 담당자','운송기사'))
+                notify_demo(sim,'도착 예측 갱신',f'{cid} · ETA {tm(predicted.p50)} · 입력 품질 점수 {predicted.trust_score}점',('플래너','관제 담당자','운송기사'))
                 st.rerun()
         if sim.statuses[cid]!='EN_ROUTE':st.caption('이미 도착한 화물은 예측을 덮어쓰지 않습니다. 운송 중인 컨테이너를 선택하면 입력을 반영할 수 있습니다.')
         a,b,c3=st.columns(3)
-        with a:metric('현재 ETA 신뢰도',f.trust_score if f else '—','%','모의 입력 점수 · 적중 확률 아님','teal')
+        with a:metric('현재 ETA 입력 품질',f.trust_score if f else '—','점','규칙 기반 점수 · 확률 아님','teal')
         with b:metric('입력 이력의 준수율',round(evidence['준수율']*100),'%',f'{len(history)}건 · 예약 ±15분 이내의 가상 기록','blue')
         with c3:metric('위치정보 반영', '사용' if evidence['GPS 반영'] else '제외','','입력 미리보기 · 반영 버튼으로 적용','amber')
         detail=st.session_state.eta_inputs.get(cid,{}).get('evidence')
@@ -143,9 +143,9 @@ def premarshal_page(sim,chart,reset,goto):
             from ui.scene import coords,PITCH,DX,DY,DZ
             x0,y0=coords(src[0]);x1,y1=coords(candidate.stack)
             arrow=[(x0+DX/2,y0+DY/2,(src[1]-1)*PITCH+DZ),(x0+DX/2,y0+DY/2,3),(x1+DX/2,y1+DY/2,3),(x1+DX/2,y1+DY/2,(candidate.tier-1)*PITCH+DZ)]
-            # 노랑은 대표 컨테이너로 유지하고, 이동 대상은 화살표와 목적 위치(초록)로 구분합니다
+            # 주황은 대표 컨테이너로 유지하고, 이동 대상은 화살표와 목적 위치(초록)로 구분합니다
             chart(yard_figure(o,st.session_state.get('focus'),(candidate.stack,candidate.tier),height=350,arrow=arrow),'premarshal_yard')
-            st.caption(f'흰 화살표: 이동 대상 {cid}의 경로 · 반투명 초록: 목적 위치 · 노랑: 대표 컨테이너')
+            st.caption(f'남색 화살표: 이동 대상 {cid}의 경로 · 반투명 초록: 목적 위치 · 주황: 대표 컨테이너')
     with right:
         with st.container(key='focus'):
             panel('유휴시간에 앞당길 작업','REVIEW BEFORE MOVE')

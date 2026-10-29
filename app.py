@@ -116,7 +116,7 @@ with st.spinner('동일 조건의 비교 결과를 계산하고 있습니다…'
 
 title,eyebrow,description=PAGES[page]
 title='수출 컨테이너 통합 관제' if page=='dashboard' else title
-html(f'<div class="page-head"><div><div class="eyebrow">OPERATIONS / {eyebrow}</div><h1>{title}</h1><p>{description}</p></div><div class="head-right">{badge("SYNTHETIC DEMO")}<div class="head-time">{tm(o.now)}<span style="font-size:13px;color:#7892a8"> KST</span></div><div class="head-date">2026.10.12 · 시뮬레이션 시각</div></div></div>')
+html(f'<div class="page-head"><div><div class="eyebrow">OPERATIONS / {eyebrow}</div><h1>{title}</h1><p>{description}</p></div><div class="head-right">{badge("SYNTHETIC DEMO")}<div class="head-time">{tm(o.now)}<span style="font-size:13px;color:#5F6368"> KST</span></div><div class="head-date">2026.10.12 · 시뮬레이션 시각</div></div></div>')
 
 def source_strip():
     html('<div class="source-strip"><span><b>올컨e</b><em>반입·운송 정보</em></span><span class="arrow">→</span><span><b>Port-i</b><em>선박 일정</em></span><span class="arrow">→</span><span><b>TOS</b><em>야드·선적계획</em></span><span class="arrow">→</span><span class="teal">StowSync 의사결정</span><span class="right">모의 데이터 연계</span></div>')
@@ -232,7 +232,7 @@ def eta_page():
     left,right=st.columns([2.1,1],gap='medium')
     with left:
         with st.container(key='eta_chart'):
-            panel('예약과 도착의 간격','ARRIVAL WINDOWS','굵은 회색 막대는 예약 구간, 청록색 선은 합성 ETA 구간입니다.')
+            panel('예약과 도착의 간격','ARRIVAL WINDOWS','굵은 회색 막대는 예약 구간, 주황색 선은 합성 ETA 구간입니다.')
             chart(arrival_chart(o,355),'eta_intervals')
     with right:
         with st.container(key='focus'):
@@ -266,7 +266,7 @@ def recommend_page():
     left,right=st.columns([1.65,1],gap='medium')
     with left:
         with st.container(key='canvas'):
-            panel('선택한 적치 대안','SPATIAL PREVIEW',f'{cid} → {slot(chosen.stack,chosen.tier)} · 반투명 청록색은 추천 위치')
+            panel('선택한 적치 대안','SPATIAL PREVIEW',f'{cid} → {slot(chosen.stack,chosen.tier)} · 반투명 초록은 추천 위치')
             chart(yard_figure(o,cid,(chosen.stack,chosen.tier),height=380,focus_only=focus_toggle()),'yard3d');legend()
     with right:
         with st.container(key='review'):

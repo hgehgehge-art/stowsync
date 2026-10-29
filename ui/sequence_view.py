@@ -16,7 +16,8 @@ LETTERS = 'ABCDEFGH'
 SOURCE_NOTE = '시연용 합성 데이터(올컨e·Port-i·TOS 연동 가정)'
 VALID_SECONDS = 60
 # 선박별 색과 무늬: 색만으로 구분하지 않도록 무늬를 함께 씁니다.
-VESSEL_STYLE = [('#ED6B2C', 'solid'), ('#3C3E90', 'stripe'), ('#C06443', 'dots'), ('#2A3449', 'cross')]
+# 주황(#ED6B2C)은 대표·하차 예정 표시에 쓰므로 선박 색에서는 뺍니다.
+VESSEL_STYLE = [('#3C3E90', 'solid'), ('#C06443', 'stripe'), ('#2A3449', 'dots'), ('#5F6368', 'cross')]
 
 
 def quality_grade(f):
