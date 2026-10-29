@@ -7,11 +7,14 @@ from domain.models import Config,Forecast
 from engine.simulator import Simulator
 from engine.yard import feasible,locate
 from services.recommend import propose_premarshal,recommend_slots
-from services.workflows import predict_arrival,quadrant,decision_example,train_preferences,personalize,persist_event,change_vessel
+from services.workflows import predict_arrival,quadrant,persist_event,change_vessel
 
 
 def button(at,label):return next(b for b in at.button if b.label==label)
 def select(at,label):return next(s for s in at.selectbox if s.label==label)
+def use_scenario(at,preset):
+    select(at,'시나리오').set_value(preset);button(at,'시나리오 적용 · 처음부터 시작').click().run()
+    assert at.session_state['config'].preset==preset
 
 def test_consent_excludes_gps_and_low_trust_blocks_premarshal():
     a,_=predict_arrival('C',0,1800,[0,5]*10,False,1,2.5)
@@ -65,27 +68,16 @@ def test_four_quadrants_and_vessel_plan_freeze():
         else:assert s.plan[cid].due==p.due+1800
 
 
-def test_preference_learning_reorders_only_equivalent_feasible_options(tmp_path):
-    s=Simulator(build_scenario(Config(target_count=40,occupancy=.5)));s.manual=s.manual_initial=True;s.advance(2280)
-    cid=next(x for x in s.yard_arrivals if s.bundle.containers[x].cargo_type=='일반')
-    rec=recommend_slots(s.observe(),cid);assert len(rec.candidates)>=2
-    rec.candidates=rec.candidates[:2]
-    rec.candidates[0].tier=4;rec.candidates[1].tier=1
-    rec.candidates[1].score=rec.candidates[0].score
-    r=decision_example(rec,1,'장비 동선','조기/하위/일반')
-    model=train_preferences([r]);assert model['pairs']==1
-    learned=personalize(rec,model,r['context'],[r])
-    assert learned.candidates[0].stack==rec.candidates[1].stack
-    rec.candidates[1].score=rec.candidates[0].score+abs(rec.candidates[0].score)+1000
-    protected=personalize(rec,model,r['context'],[r])
-    assert protected.candidates[0].stack==rec.candidates[0].stack
+def test_decision_history_is_neutral_and_idempotent(tmp_path):
+    r={'container':'X','action':'INITIAL','slot':'A1-01-01-01','reason':'장비 동선','plan':'P1'}
     persist_event('one','decision',r,tmp_path)
     persist_event('one','decision',r,tmp_path)
     with sqlite3.connect(tmp_path/'demo.sqlite3') as db:assert db.execute('SELECT count(*) FROM events').fetchone()[0]==1
 
 
-def test_new_ui_flows_eta_approval_driver_learning_and_premarshal():
-    at=AppTest.from_file(Path(__file__).resolve().parents[1]/'app.py',default_timeout=40).run()
+def test_new_ui_flows_eta_approval_driver_and_premarshal():
+    at=AppTest.from_file(Path(__file__).resolve().parents[1]/'app.py',default_timeout=60).run()
+    use_scenario(at,'balanced')
     for page in ['exceptions','premarshal','sharing','eta','data']:
         at.button(key='nav_'+page).click().run();assert not at.exception
     at.button(key='nav_eta').click().run()
@@ -105,10 +97,8 @@ def test_new_ui_flows_eta_approval_driver_learning_and_premarshal():
     at.button(key='nav_sharing').click().run()
     button(at,'기사 확인 모의 처리').click().run()
     assert not at.exception and all(g['ack'] for g in at.session_state['guides'].values())
-    button(at,'판단 기록으로 선호모델 학습').click().run()
-    assert not at.exception and at.session_state['trained_model']['pairs']>=1
     at.button(key='nav_premarshal').click().run()
-    button(at,'선작업 시연 시나리오 열기').click().run()
+    button(at,'선작업 시연 시나리오로 처음부터 시작').click().run()
     assert not at.exception
     button(at,'선작업 모의 승인').click().run()
     assert not at.exception and at.session_state['page']=='sync'

@@ -16,24 +16,28 @@ from engine.yard import blockers, locate, rank
 from services.recommend import recommend_slots, propose_premarshal
 from services.metrics import export_zip, eta_accuracy, csv_bytes
 from ui.theme import inject, html, badge, panel, metric, table, tm, mins, footer
-from ui.charts import yard_figure, arrival_chart, comparison_chart, cumulative_chart
-from ui.workflows import (ensure_workflows, arrival_inputs, cargo_panel, apply_preferences, context_for,
+from ui.charts import arrival_chart, comparison_chart, cumulative_chart
+from ui.scene import yard_figure, replay_figure
+from ui.workflows import (ensure_workflows, arrival_inputs, cargo_panel,
     record_approval, notify_demo, exceptions_page, premarshal_page, sharing_page, connections_panel)
+from ui.story_page import story_page, checklist, legend3d, trucks_at, STAGES
+from services.story import STORY_CONFIG, start_story, replay_steps
 
 st.set_page_config(page_title='StowSync | 수출 컨테이너 통합 관제',page_icon='◈',layout='wide',initial_sidebar_state='expanded')
 inject()
 ensure_workflows()
 
-PAGES={'dashboard':('통합 관제','CONTROL CENTER','항만의 흐름을 연결하고, 다음 작업을 준비합니다.'),
+PAGES={'story':('대표 사례 흐름','CASE WALKTHROUGH','컨테이너 한 개의 도착 정보 변화부터 승인·작업·결과까지 이어서 확인합니다.'),
+       'dashboard':('통합 관제','CONTROL CENTER','항만의 흐름을 연결하고, 다음 작업을 준비합니다.'),
        'eta':('트럭 ETA','ARRIVAL INTELLIGENCE','예약과 도착의 차이를, 배치 의사결정의 시작으로.'),
        'recommend':('CY 배치 추천','YARD DECISION','보이는 근거로 비교하고, 현장의 판단으로 결정합니다.'),
        'premarshal':('유휴시간 선작업','PRE-MARSHALLING','미리 움직이는 비용까지 비교하고, 여유시간에 실행합니다.'),
        'exceptions':('2×2 예외 대응','EXCEPTION PLAYBOOK','도착 편차와 선적 순위에 따라, 다음 배치의 원칙을 정합니다.'),
-       'sharing':('기사 안내·학습','CONNECTED DECISIONS','승인 결과는 현장으로, 현장의 판단은 다음 추천으로.'),
+       'sharing':('기사 안내·알림','CONNECTED DECISIONS','승인 결과를 역할별로 안내하고, 판단은 중립 이력으로 남깁니다.'),
        'sync':('변경·승인','HUMAN + AI','계획 변경부터 실행 확인까지, 하나의 결정 이력으로.'),
-       'impact':('효과 분석','PERFORMANCE LAB','같은 도착, 같은 작업 조건. 결과로 확인하는 운영 효과.'),
+       'impact':('정책 실험실','POLICY LAB · 별도 자동 실험','대표 사례와 별개로, 같은 합성 사건에서 세 정책을 자동으로 비교합니다.'),
        'data':('데이터 연계','CONNECTED OPERATIONS','지금은 모의 데이터로, 이후에는 기존 시스템과 연결합니다.')}
-PRESET_LABELS={'balanced':'기본 운영','late_priority':'지연 도착 · 선적 상위','early_priority':'조기 도착 · 선적 상위','uncertain':'ETA 불확실성 확대','reversal':'선적계획 변경','capacity':'공간 부족','cutoff':'반입 마감 초과','early_low':'조기 도착 · 선적 하위','late_low':'지연 도착 · 선적 하위','premarshal_demo':'유휴시간 선작업 검토'}
+PRESET_LABELS={'story':'대표 사례 · 20개','balanced':'기본 운영','late_priority':'지연 도착 · 선적 상위','early_priority':'조기 도착 · 선적 상위','uncertain':'ETA 불확실성 확대','reversal':'선적계획 변경','capacity':'공간 부족','cutoff':'반입 마감 초과','early_low':'조기 도착 · 선적 하위','late_low':'지연 도착 · 선적 하위','premarshal_demo':'유휴시간 선작업 검토'}
 STATUSES={'EN_ROUTE':'운송 중','GATE_QUEUE':'게이트 대기','GATE_SERVICE':'게이트 처리','INTERNAL_TRAVEL':'CY 이동 중','YARD_QUEUE':'하차 대기','BLOCKED_CAPACITY':'공간 부족','STORED':'적치 완료','IN_MOVE':'작업 중','RETRIEVED':'인출 완료','EXCEPTION_LATE':'마감 예외','WAIT_GATE_OPEN':'반입 대기'}
 MOVE_LABELS={'INITIAL':'최초 적치','PREMARSH':'사전 이동','REHANDLE':'재취급','RETRIEVE':'본선 인출'}
 
@@ -44,25 +48,34 @@ def comparison(config_json):
     return {p:run_simulation(bundle,p) for p in 'ABC'}
 
 def reset_operations(cfg):
+    """명시적인 '시나리오 적용 · 처음부터 시작'에서만 호출합니다."""
     st.session_state.config=cfg
-    bundle=build_scenario(cfg)
-    sim=Simulator(bundle,'C');sim.manual=True;sim.manual_initial=True;sim.advance(0 if cfg.preset=='premarshal_demo' else 2280)
+    if cfg.preset=='story':
+        sim,story=start_story(cfg)
+        bundle=sim.bundle
+    else:
+        bundle=build_scenario(cfg);story=None
+        sim=Simulator(bundle,'C');sim.manual=True;sim.manual_initial=True;sim.advance(0 if cfg.preset=='premarshal_demo' else 2280)
     st.session_state.ops=sim
+    st.session_state.story=story
+    for key in ('story_stage','story_option','story_choice','_goto_stage'):st.session_state.pop(key,None)
     st.session_state.review_log=[]
     st.session_state.guides={}
     st.session_state.notices=[]
     st.session_state.eta_inputs={}
     st.session_state.held=set()
     ready=sorted(sim.yard_arrivals,key=lambda x:(sim.cranes[bundle.containers[x].block] is not None,bundle.containers[x].cargo_type!='일반',sim.yard_arrivals[x]))
-    st.session_state.selected=ready[0] if ready else next(cid for cid,c in bundle.containers.items() if not c.initial)
+    st.session_state.focus=story['focus'] if story else (ready[0] if ready else next(cid for cid,c in bundle.containers.items() if not c.initial))
     st.session_state.pop('active_recommendation',None)
 
-if 'config' not in st.session_state or st.session_state.get('workflow_version')!=2:
-    reset_operations(Config(target_count=40,occupancy=.5))
-    st.session_state.workflow_version=2
-if 'page' not in st.session_state:
-    st.session_state.page=st.query_params.get('page','dashboard')
-    if st.session_state.page not in PAGES:st.session_state.page='dashboard'
+if 'config' not in st.session_state or st.session_state.get('workflow_version')!=3:
+    reset_operations(STORY_CONFIG)
+    st.session_state.workflow_version=3
+# 화면 이동은 조회만 바꿉니다. URL(뒤로 가기 포함)의 page를 따라가되 시뮬레이션 상태는 건드리지 않습니다.
+_qp=st.query_params.get('page')
+if _qp in PAGES:st.session_state.page=_qp
+elif 'page' not in st.session_state:st.session_state.page='story'
+if st.query_params.get('page')!=st.session_state.page:st.query_params['page']=st.session_state.page
 
 def navigate(page):
     st.session_state.page=page;st.query_params['page']=page
@@ -75,17 +88,17 @@ with st.sidebar:
     html('<div class="side-label">WORKSPACE</div>')
     st.selectbox('터미널', ['부산항 · 가상 터미널'],label_visibility='collapsed',key='terminal')
     html('<div class="side-label">OPERATIONS</div>')
-    icons={'dashboard':':material/dashboard:','eta':':material/local_shipping:','recommend':':material/view_in_ar:','sync':':material/rule:','impact':':material/monitoring:','data':':material/hub:','premarshal':':material/forklift:','exceptions':':material/grid_view:','sharing':':material/connect_without_contact:'}
+    icons={'story':':material/route:','dashboard':':material/dashboard:','eta':':material/local_shipping:','recommend':':material/view_in_ar:','sync':':material/rule:','impact':':material/monitoring:','data':':material/hub:','premarshal':':material/forklift:','exceptions':':material/grid_view:','sharing':':material/connect_without_contact:'}
     for key in PAGES:
         if key=='impact':html('<div class="side-label">INSIGHTS</div>')
         st.button(PAGES[key][0],icon=icons[key],key='nav_'+key,type='primary' if st.session_state.page==key else 'secondary',width='stretch',on_click=navigate,args=(key,))
     html('<div class="side-label">DEMO SCENARIO</div>')
     with st.form('scenario_form',border=False):
         preset=st.selectbox('시나리오',list(PRESET_LABELS),format_func=lambda x:PRESET_LABELS[x],index=list(PRESET_LABELS).index(cfg.preset),label_visibility='collapsed')
-        if st.form_submit_button('시나리오 적용',width='stretch'):
-            reset_operations(cfg.model_copy(update={'preset':preset}));st.rerun()
+        if st.form_submit_button('시나리오 적용 · 처음부터 시작',width='stretch',help='진행 상태와 판단 기록을 지우고 선택한 시나리오를 처음부터 시작합니다.'):
+            reset_operations(STORY_CONFIG if preset=='story' else Config(target_count=40,occupancy=.5,preset=preset));st.rerun()
     st.toggle('캡처 모드',key='capture_mode',help='조작 안내를 줄여 기획서에 넣기 편하게 표시합니다. 합성 데이터 표시는 유지됩니다.')
-    html('<div class="side-card"><span class="side-stamp">CONCEPT DEMO · 2026</span><p><strong>올컨e 연계 서비스 제안</strong><br>수출 FCL · 2개 블록 · 20ft<br>야드 플래너 의사결정 지원</p><p>기존 시스템과의 연계는 준비 단계입니다.<br>현재 화면은 합성 데이터로 동작합니다.</p></div>')
+    html('<div class="side-card"><span class="side-stamp">CONCEPT DEMO · 2026</span><p><strong>올컨e 연계 서비스 제안</strong><br>수출 FCL · 2개 블록 · 20ft · 대표 사례 20개<br>야드 플래너 의사결정 지원</p><p>기존 시스템과의 연계는 준비 단계입니다.<br>현재 화면은 합성 데이터로 동작합니다.</p></div>')
 
 sim=st.session_state.ops;o=sim.observe();cfg=st.session_state.config;page=st.session_state.page
 with st.spinner('동일 조건의 비교 결과를 계산하고 있습니다…'):
@@ -100,14 +113,26 @@ def source_strip():
 
 def chart(fig,key): st.plotly_chart(fig,width='stretch',theme=None,key=key,config={'displayModeBar':False,'scrollZoom':False})
 
+def focus_toggle():
+    return st.toggle('선택 화물 보기(나머지는 흐리게)',key='focus_only',help='가려진 대표 컨테이너를 확인할 수 있도록 다른 스택을 흐리게 표시합니다.')
+
+def cargo_word(cid):
+    c=o.containers[cid]
+    return '⚠ 위험물' if c.cargo_type=='위험물' else c.cargo_type
+
+def _set_focus(key):
+    st.session_state.focus=st.session_state[key]
+
 def choose_container(label='검토 컨테이너',only_pending=False):
+    """대표 컨테이너는 사용자가 직접 바꾸기 전까지 유지합니다. 목록에서 빠져도 다른 화물로 자동 전환하지 않습니다."""
+    focus=st.session_state.focus
     choices=[cid for cid,c in o.containers.items() if not c.initial and (not only_pending or o.statuses[cid] not in ('STORED','RETRIEVED','IN_MOVE','EXCEPTION_LATE'))]
+    if focus in o.containers and focus not in choices:choices=[focus]+choices
     if not choices:return None
-    selected=st.session_state.selected
-    if selected not in choices:selected=choices[0]
-    cid=st.selectbox(label,choices,index=choices.index(selected),format_func=lambda x:f'{x}  ·  {STATUSES.get(o.statuses[x],o.statuses[x])}',key='choose_'+page)
-    st.session_state.selected=cid
-    return cid
+    key='choose_'+page
+    st.session_state[key]=focus if focus in choices else choices[0]
+    st.selectbox(label,choices,format_func=lambda x:f'{x}  ·  {STATUSES.get(o.statuses[x],o.statuses[x])}  ·  {cargo_word(x)}',key=key,on_change=_set_focus,args=(key,))
+    return st.session_state[key]
 
 def state_badge(cid):
     s=o.statuses[cid]
@@ -123,13 +148,13 @@ def arrival_rows(limit=5):
         rows.append([escape(cid),f'{tm(c.booking_start)}–{tm(c.booking_end)}',eta,f'#{o.plan[cid].sequence:02d}',state_badge(cid)])
     return rows
 
-def legend(): html('<div class="legend"><span><i class="dot blue"></i>일반 적치</span><span><i class="dot amber"></i>선적 상위</span><span><i class="dot coral"></i>인출 방해</span><span><i class="dot"></i>선택·추천 위치</span></div>')
+def legend(): legend3d()
 
 def selected_recommendation(cid):
     current=st.session_state.get('active_recommendation')
     if current is None or current.container_id!=cid or current.yard_version!=o.yard_version or current.plan_version!=o.plan_version or o.now>current.valid_until:
         current=recommend_slots(o,cid,'C');st.session_state.active_recommendation=current
-    return apply_preferences(current,o)
+    return current
 
 def focus_card(cid):
     c=o.containers[cid];f=o.forecasts.get(cid)
@@ -140,11 +165,11 @@ def focus_card(cid):
     html(f'<div class="focus-id">{cid} · 수출 FCL</div><div class="detail-row"><span>예약 시간대</span><b>{tm(c.booking_start)}–{tm(c.booking_end)}</b></div><div class="detail-row"><span>도착 예측 구간</span><b>{tm(f.p10)+"–"+tm(f.p90) if f else "정보 없음"}</b></div><div class="detail-row"><span>현재 선적 순위</span><b>#{o.plan[cid].sequence:02d} / {len(o.plan)}</b></div>')
     html(f'<div class="focus-route"><span>추천 적치 위치</span><strong>{slot(candidate.stack,candidate.tier) if candidate else "재검토 필요"}</strong></div>')
     if st.button('배치 대안 검토',icon=':material/arrow_forward:',type='primary',width='stretch',key='focus_action'):
-        st.session_state.selected=cid;goto('recommend')
+        st.session_state.focus=cid;goto('recommend')
 
 def stack_view(target=None):
     risks,_=blockers(o.yard,o.plan)
-    keys=[k for k in o.yard if k.startswith(o.containers[st.session_state.selected].block)]
+    keys=[k for k in o.yard if k.startswith(o.containers[st.session_state.focus].block)]
     columns=[]
     for k in keys:
         cells=[]
@@ -167,12 +192,12 @@ def dashboard():
     with cs[3]:metric('배치 검토 대기',len(sim.yard_arrivals),'건','CY 도착 · 관리자 승인 전','amber','ACTION')
     left,right=st.columns([2.2,1],gap='medium')
     pending=sorted((x for x in sim.yard_arrivals if x not in st.session_state.held),key=lambda x:(sim.cranes[o.containers[x].block] is not None,o.containers[x].cargo_type!='일반',sim.yard_arrivals[x]))
-    cid=pending[0] if pending else st.session_state.selected
+    cid=pending[0] if pending else st.session_state.focus
     rec=recommend_slots(o,cid,'C');target=(rec.candidates[0].stack,rec.candidates[0].tier) if rec.candidates else None
     with left:
         with st.container(key='canvas'):
             panel('야드 디지털 뷰','YARD / 3D',f'가상 터미널 · A1 / B1 블록 · 현재 상태 {tm(o.now)}')
-            chart(yard_figure(o,cid,target,height=333),'dashboard_yard')
+            chart(yard_figure(o,cid,target,height=380,focus_only=focus_toggle()),'yard3d')
             legend()
     with right:
         with st.container(key='focus'):focus_card(cid)
@@ -212,32 +237,38 @@ def eta_page():
 def recommend_page():
     source_strip();cid=choose_container(only_pending=True)
     if cid is None:st.info('모든 반입 대상의 적치가 완료되었습니다. 다른 시나리오를 적용해 보세요.');return
+    if o.statuses[cid] in ('STORED','RETRIEVED','IN_MOVE','EXCEPTION_LATE'):
+        pos=locate(o.yard,cid)
+        st.info(f'{cid}는 {STATUSES[o.statuses[cid]]} 상태입니다'+(f' (현재 {slot(*pos)})' if pos else '')+'. 다른 화물은 위 목록에서 직접 고를 수 있습니다.')
+        chart(yard_figure(o,cid,height=400,focus_only=focus_toggle()),'yard3d');legend();return
     cargo_ready=cargo_panel(sim,cid)
     rec=selected_recommendation(cid)
     if not rec.candidates:st.warning('허용 가능한 적치 후보가 없습니다. 공간·화물·장비 제약을 확인해 주세요.');return
-    if st.session_state.learning_enabled and st.session_state.trained_model:st.caption('현장 선호모델 '+st.session_state.trained_model['version']+' 적용 · 물리 제약과 유사 비용 범위 내 재정렬')
     options=rec.candidates[:3]
     selected_index=st.radio('비교할 배치 대안',range(len(options)),format_func=lambda i:f'대안 {i+1} · {slot(options[i].stack,options[i].tier)}',horizontal=True,key='candidate_'+rec.recommendation_id)
     chosen=options[selected_index]
     for i,(col,candidate) in enumerate(zip(st.columns(len(options)),options)):
         with col:
             reasons='선행 화물의 인출을 가로막지 않음' if 'NO_EARLIER_BOX_BELOW' in candidate.reason_codes else '기존 화물과의 인출 순서 상충 검토'
-            html(f'<div class="candidate {"best" if i==0 else ""}"><div class="candidate-rank">OPTION 0{i+1} &nbsp; {"RECOMMENDED" if i==0 else "ALTERNATIVE"}</div><div class="candidate-slot">{slot(candidate.stack,candidate.tier)}</div><div class="candidate-fact">평가 야드 재취급 <b>{candidate.rehandles:.2f}회</b></div><div class="candidate-fact">총 추가 이동 <b>{candidate.rehandles+candidate.premarshals:.2f}회</b></div><div class="candidate-fact">추가 이동 작업시간 <b>{candidate.extra_seconds/60:.1f}분</b></div><div class="candidate-fact">평가 조건 <b>60분 · {cfg.samples}회</b></div><div class="candidate-fact">위치·높이·하중 제약 <b class="teal">충족</b></div><div class="reason">{reasons}</div></div>')
+            html(f'<div class="candidate {"best" if i==0 else ""}"><div class="candidate-rank">OPTION 0{i+1} &nbsp; {"RECOMMENDED" if i==0 else "ALTERNATIVE"}</div><div class="candidate-slot">{slot(candidate.stack,candidate.tier)}</div><div class="candidate-fact">평가 야드 재취급 <b>{candidate.rehandles:.2f}회</b></div><div class="candidate-fact">총 추가 이동 <b>{candidate.rehandles+candidate.premarshals:.2f}회</b></div><div class="candidate-fact">추가 이동 작업시간 <b>{candidate.extra_seconds/60:.1f}분</b></div><div class="candidate-fact">평가 범위 <b>야드 전체 · 60분</b></div><div class="candidate-fact">위치·높이·하중 제약 <b class="teal">충족</b></div><div class="reason">{reasons}</div></div>')
+    st.caption(f'카드의 수치는 앞으로 60분 동안 가능한 도착 상황 {cfg.samples}가지를 가정해 후보를 비교한 예상 평균입니다. '
+               '대표 컨테이너 한 개가 아니라 이 후보를 골랐을 때 야드 전체(블록 A1·B1)에서 생길 추가 이동이며, 실행 후 관측값과 다를 수 있습니다.')
     left,right=st.columns([1.65,1],gap='medium')
     with left:
         with st.container(key='canvas'):
             panel('선택한 적치 대안','SPATIAL PREVIEW',f'{cid} → {slot(chosen.stack,chosen.tier)} · 반투명 청록색은 추천 위치')
-            chart(yard_figure(o,cid,(chosen.stack,chosen.tier),height=325),'recommend_yard');legend()
+            chart(yard_figure(o,cid,(chosen.stack,chosen.tier),height=380,focus_only=focus_toggle()),'yard3d');legend()
     with right:
         with st.container(key='review'):
             panel('현장 관리자 검토','HUMAN IN THE LOOP')
             html(f'<div class="detail-row"><span>추천 대상</span><b>{cid}</b></div><div class="detail-row"><span>계획 버전</span><b>{rec.plan_version} / Y{rec.yard_version}</b></div><div class="detail-row"><span>추천 유효시각</span><b>{tm(rec.valid_until)}</b></div><div class="detail-row"><span>크레인</span><b>YC-{o.containers[cid].block}</b></div>')
-            reason=st.selectbox('판단 사유',['추천 근거와 현장 조건 일치','장비 작업 순서 고려','현장 혼잡으로 보류','추천 외 대안이 현장에 적합'],key='decision_reason')
-            can_approve=cid in sim.yard_arrivals and sim.cranes[o.containers[cid].block] is None and cid not in st.session_state.held and cargo_ready
+            reason=st.selectbox('판단 사유(선택)',['선택 안 함','추천 근거와 현장 조건 일치','장비 작업 순서 고려','현장 혼잡으로 보류','추천 외 대안이 현장에 적합'],key='decision_reason')
+            already=any(v['container_id']==cid for v in sim.accepted.values())
+            can_approve=cid in sim.yard_arrivals and sim.cranes[o.containers[cid].block] is None and cid not in st.session_state.held and cargo_ready and not already
             if st.button('선택한 배치 모의 승인',type='primary',width='stretch',disabled=not can_approve):
                 report=sim.approve(rec,selected_index)
                 if report.valid:
-                    record_approval(sim,rec,selected_index,reason,context_for(o,cid))
+                    record_approval(sim,rec,selected_index,reason)
                     st.session_state.review_log.append({'시각':tm(sim.now),'컨테이너':cid,'결정':'승인','위치':slot(chosen.stack,chosen.tier),'사유':reason,'추천ID':rec.recommendation_id})
                     st.session_state.pop('active_recommendation',None);goto('sync')
                 else:st.error(' · '.join(report.errors))
@@ -259,7 +290,15 @@ def sync_page():
     with cs[1]:metric('작업 중',executing,'건','승인된 비선점 작업','amber')
     with cs[2]:metric('작업 완료',completed,'건','이동 완료 사건 기준','blue')
     with cs[3]:metric('보류',len(st.session_state.held),'건','현장 사유 기록','coral')
-    html('<div class="steps"><div class="step active">01 변경 감지<small>도착·선적계획 갱신</small></div><div class="step active">02 대안 비교<small>제약과 작업량 확인</small></div><div class="step active">03 관리자 승인<small>판단 근거 기록</small></div><div class="step">04 작업 완료<small>이동 로그로 확인</small></div></div>')
+    story=st.session_state.story
+    if story:checklist(sim,story)
+    approved=[e['at'] for e in sim.events if e['kind']=='APPROVED']
+    if approved:
+        with st.container(key='canvas'):
+            panel('승인한 작업의 3D 재생','REPLAY · 실행 로그','첫 승인 시각부터 지금까지 실제 시뮬레이션 로그를 그대로 재생합니다. 다시 보기를 해도 작업이 다시 실행되지 않습니다.')
+            steps,final=replay_steps(sim.bundle,sim.moves,min(approved),sim.now,st.session_state.focus)
+            chart(replay_figure(sim.bundle,sim.plan,steps,final,st.session_state.focus,trucks_at(sim)),'yard3d_replay_sync');legend3d()
+            if not steps:st.caption('아직 완료된 이동이 없습니다. 오른쪽 아래 버튼으로 작업을 진행하면 이동 중 → 완료 장면이 생깁니다.')
     left,right=st.columns([1.6,1])
     with left:
         with st.container(key='review'):
@@ -290,14 +329,15 @@ def sync_page():
             if st.button('현재 작업 완료까지 진행',width='stretch',disabled=not jobs):
                 sim.advance(max(j['end_at'] for j in jobs));st.session_state.pop('active_recommendation',None);st.rerun()
             if st.session_state.held and st.button('보류 해제 후 재검토',width='stretch'):
-                st.session_state.selected=sorted(st.session_state.held)[0];st.session_state.held.clear();goto('recommend')
-            if st.button('기사 안내·현장 학습 열기',width='stretch'):goto('sharing')
+                st.session_state.focus=sorted(st.session_state.held)[0];st.session_state.held.clear();goto('recommend')
+            if st.button('기사 안내·알림 열기',width='stretch'):goto('sharing')
             html('<div class="section-note">이 버튼은 데모의 시간을 진행합니다. 승인한 하차 위치는 기사 안내 미리보기에 연결됩니다. 실제 TOS 지시나 기사 알림은 전송되지 않습니다.</div>')
     if st.session_state.review_log:
         st.download_button('판단 이력 CSV',csv_bytes(st.session_state.review_log),'stowsync_decisions.csv','text/csv',icon=':material/download:')
 
 def impact_page():
     source_strip();a=results['A'].metrics;b=results['B'].metrics;c=results['C'].metrics
+    html('<div class="section-note"><strong>별도 자동 실험입니다.</strong> 대표 사례 흐름에서 방금 승인한 작업의 효과가 아니라, 같은 합성 사건(40개 화물)에 세 정책을 자동으로 적용한 결과입니다. 방금 승인한 작업의 결과는 대표 사례 흐름 ⑥에서 확인합니다.</div>')
     complete=all(results[p].metrics['incomplete']==0 for p in 'ABC')
     gain=(a['extra_moves']-c['extra_moves'])/a['extra_moves']*100 if a['extra_moves'] else None
     cs=st.columns(4)
@@ -361,7 +401,7 @@ def data_page():
             ['도착 예측','합성 ETA + 예약·이력·동의 GPS 입력 실험','현장 이력 학습·신뢰도 보정'],
             ['배치 추천','60분 미래·8개 시나리오 평가','현장 비용·제약 보정'],
             ['의사결정','모의 승인·보류·실행 이력','TOS 승인·지시 절차 연결'],
-            ['학습','선택 기록 기반 경량 선호학습·버전별 반영','딥러닝·실행 결과 평가·정기 개선'],
+            ['판단 이력','승인·보류·사유를 중립 기록으로 저장(채점·자동 학습 없음)','현장 검토를 거친 정기 개선'],
         ])
     left,right=st.columns([1,1])
     with left:
@@ -372,10 +412,10 @@ def data_page():
         st.markdown('- [올컨e 공식 매뉴얼](https://www.chainportal.co.kr/manual/download?filename=ChainPortal_APP_Manual.pdf)\n- [BPA Port-i 서비스 소개](https://busanpa.com/board/view.do?boardId=BBS_0000031&dataSid=34863&menuCd=DOM_000000105002001000)\n- [도착 불확실성을 고려한 배치 연구](https://research.utwente.nl/en/publications/approximate-dynamic-programming-for-container-stacking/)')
     html('<div class="export-banner"><strong>기획서 캡처 추천</strong> · 통합 관제: 서비스 전체상 / CY 배치 추천: 핵심 의사결정 / 변경·승인: Human-AI 협업 / 효과 분석: 성과 검증 구조<br>좌측의 캡처 모드를 켜면 조작 도움말이 간소화됩니다. 합성 데이터 표시는 유지됩니다.</div>')
 
-{'dashboard':dashboard,'eta':eta_page,'recommend':recommend_page,'sync':sync_page,'impact':impact_page,'data':data_page,
+{'story':lambda:story_page(sim,st.session_state.story,goto) if st.session_state.story else st.info('대표 사례 흐름은 「대표 사례 · 20개」 시나리오에서 볼 수 있습니다. 왼쪽에서 시나리오를 적용해 주세요.'),'dashboard':dashboard,'eta':eta_page,'recommend':recommend_page,'sync':sync_page,'impact':impact_page,'data':data_page,
  'exceptions':lambda:exceptions_page(sim,choose_container,chart,goto),
  'premarshal':lambda:premarshal_page(sim,chart,reset_operations,goto),
  'sharing':lambda:sharing_page(sim)}[page]()
-if not st.session_state.capture_mode and page in ('dashboard','eta'):
-    st.caption('시연 방법: 우선 검토 화물 확인 → CY 배치 추천 → 모의 승인 → 변경·승인에서 작업 진행 → 효과 분석에서 정책 비교')
+if not st.session_state.capture_mode and page in ('dashboard','eta','story'):
+    st.caption('시연 방법: 대표 사례 흐름에서 ① 상황 확인 → ② 문제 확인 → ③ 대안 비교 → ④ 승인·보류 → ⑤ 작업 실행 → ⑥ 결과 확인')
 footer()

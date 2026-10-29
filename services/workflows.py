@@ -1,9 +1,8 @@
-"""Demo input fusion, exception policies and bounded preference learning.
+"""Demo input fusion, exception policies and neutral decision history (no preference learning).
 
 No production forecast, IMDG validation or external delivery is performed.
 """
 from dataclasses import asdict
-from math import exp
 from statistics import mean, median, pstdev
 from copy import deepcopy
 import json
@@ -70,45 +69,6 @@ def change_vessel(sim,minutes):
     version='P-DEMO-'+stable_hash([sim.now,sim.plan_version,minutes])[:4]
     sim.handle('PLAN_UPDATE',{'version':version,'entries':entries})
     return version,shift
-
-FEATURE_LABELS=['재취급 부담','트럭 대기','인출 지연','적층 높이','이동 거리·시간']
-
-def features(c):
-    return [min(c.rehandles/10,3),min(c.wait_seconds/3600,3),min(c.delay_seconds/3600,3),c.tier/4,c.move_seconds/300]
-
-def decision_example(rec,index,reason,context):
-    return {'id':rec.recommendation_id,'container':rec.container_id,'context':context,'reason':reason,'chosen':index,'action':rec.action,'candidates':[{'slot':c.stack,'features':features(c),'score':c.score} for c in rec.candidates[:3]]}
-
-def train_preferences(records):
-    """Pairwise logistic preference fit from actual demo choices, no synthetic labels."""
-    pairs=[]
-    for r in records:
-        if r.get('action')!='INITIAL':continue
-        chosen=r['chosen'];options=r['candidates']
-        if not 0<=chosen<len(options):continue
-        for i,c in enumerate(options):
-            if i!=chosen:pairs.append([a-b for a,b in zip(options[chosen]['features'],c['features'])])
-    weights=[0.]*5
-    for _ in range(100):
-        for diff in pairs:
-            z=max(-30,min(30,sum(w*x for w,x in zip(weights,diff))))
-            residual=1-1/(1+exp(-z))
-            weights=[max(-4,min(4,w+.08*(residual*x-.03*w))) for w,x in zip(weights,diff)]
-    return {'version':'PREF-'+stable_hash(records)[:6],'weights':weights,'records':len(records),'pairs':len(pairs)}
-
-def personalize(rec,model,context,records):
-    result=deepcopy(rec)
-    matching=[r for r in records if r.get('context')==context and r.get('action')=='INITIAL']
-    if not model or not matching or not result.candidates:return result
-    # Learn only between physically feasible, nearly equivalent cost options.
-    best=result.candidates[0].score
-    eligible=[c for c in result.candidates if c.score<=best+max(60,abs(best)*.05)]
-    rest=[c for c in result.candidates if c not in eligible]
-    for c in eligible:c.preference=sum(w*x for w,x in zip(model['weights'],features(c)))
-    eligible.sort(key=lambda c:(-c.preference,c.score,c.stack))
-    result.candidates=eligible+rest
-    result.recommendation_id=stable_hash([rec.recommendation_id,model['version']])
-    return result
 
 def persist_event(event_id,kind,data,folder=None):
     folder=Path(folder) if folder else Path(__file__).resolve().parents[1]/'runtime'

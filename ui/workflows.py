@@ -7,15 +7,15 @@ import streamlit as st
 from domain.models import Config, slot
 from engine.yard import locate,rank
 from services.recommend import propose_premarshal,recommend_slots
-from services.workflows import (RULES,quadrant,demo_history,predict_arrival,terminal_feed,change_vessel,
-    decision_example,train_preferences,personalize,persist_event,FEATURE_LABELS)
+from services.workflows import (RULES,quadrant,demo_history,predict_arrival,terminal_feed,change_vessel,persist_event)
+from engine.simulator import premarshal_beneficiary
 from services.metrics import csv_bytes
 from ui.theme import html,badge,panel,metric,table,tm
-from ui.charts import yard_figure
+from ui.scene import yard_figure
 
 
 def ensure_workflows():
-    defaults={'feedback':[],'notices':[],'guides':{},'eta_inputs':{},'trained_model':None,'learning_enabled':False,'session_id':str(uuid4()),'training_ids':[]}
+    defaults={'notices':[],'guides':{},'eta_inputs':{},'session_id':str(uuid4()),'review_log':[],'held':set(),'capture_mode':False}
     for key,value in defaults.items():
         if key not in st.session_state:st.session_state[key]=value
 
@@ -24,24 +24,10 @@ def notify_demo(sim,title,detail,roles=('플래너','관제 담당자','운송�
     st.session_state.notices.insert(0,{'id':str(uuid4()),'at':tm(sim.now),'title':title,'detail':detail,'roles':list(roles),'read':[],'version':sim.plan_version})
 
 
-def context_for(o,cid):
-    return '/'.join(quadrant(o,cid))+'/'+o.containers[cid].cargo_type
-
-
-def apply_preferences(rec,o):
-    if st.session_state.get('learning_enabled'):
-        trained=set(st.session_state.training_ids)
-        records=[r for r in st.session_state.feedback if r['id'] in trained]
-        return personalize(rec,st.session_state.trained_model,context_for(o,rec.container_id),records)
-    return rec
-
-
-def record_approval(sim,rec,index,reason,context):
+def record_approval(sim,rec,index,reason):
+    """승인 결과를 기사 안내와 알림으로 넘기고 중립 이력으로 남깁니다. 판단을 채점하거나 학습에 쓰지 않습니다."""
     chosen=rec.candidates[index]
-    example=decision_example(rec,index,reason,context)
-    example['session_id']=st.session_state.session_id
-    if not any(r['id']==example['id'] for r in st.session_state.feedback):st.session_state.feedback.append(example)
-    persist_event(st.session_state.session_id+rec.recommendation_id,'decision',example)
+    persist_event(st.session_state.session_id+rec.recommendation_id,'decision',{'container':rec.container_id,'action':rec.action,'slot':slot(chosen.stack,chosen.tier),'reason':reason,'plan':rec.plan_version})
     if rec.action=='INITIAL':
         guide={'id':rec.recommendation_id,'container':rec.container_id,'slot':slot(chosen.stack,chosen.tier),'block':sim.bundle.containers[rec.container_id].block,'at':tm(sim.now),'plan':rec.plan_version,'ack':False,'reason':reason}
         st.session_state.guides[rec.container_id]=guide
@@ -119,7 +105,7 @@ def exceptions_page(sim,choose,chart,goto):
     f=o.forecasts.get(cid)
     if o.statuses[cid]=='EN_ROUTE' and (not f or f.trust_score<o.config.min_eta_trust or o.now-f.observed_at>=o.config.eta_stale):
         st.warning('ETA 신뢰·최신성 기준 미충족: 선작업을 보류하고 예약 기반 후보와 필수 작업을 우선합니다.')
-    rec=apply_preferences(recommend_slots(o,cid),o)
+    rec=recommend_slots(o,cid)
     panel('현재 상황의 배치 대안','EXPECTED REHANDLING','해당 후보를 선택했을 때 평가 야드 전체에서 발생할 추가 이동의 평균입니다. 소수는 여러 시나리오의 평균을 뜻합니다.')
     table(['후보','예상 재취급','선작업','총 추가 이동','전체 누적 인출 지연'],[[slot(c.stack,c.tier),f'{c.rehandles:.2f}회',f'{c.premarshals:.2f}회',f'{c.rehandles+c.premarshals:.2f}회',f'{c.delay_seconds/60:.1f}분'] for c in rec.candidates[:3]])
     if rec.candidates:chart(yard_figure(o,cid,(rec.candidates[0].stack,rec.candidates[0].tier),height=300),'exception_yard')
@@ -136,29 +122,40 @@ def premarshal_page(sim,chart,reset,goto):
     with c:metric('ETA 신뢰 기준',o.config.min_eta_trust,'%','모의 입력 점수 기준','blue')
     if not rec:
         st.info('현재 안전하게 앞당길 선작업이 없습니다. 필수 작업·하차 대기·예측 불확실성이 있거나, 이동 비용을 포함한 개선 조건을 충족하지 못했습니다.')
-        if st.button('선작업 시연 시나리오 열기',type='primary',help='현재 운영 상태를 초기화하고 반입 전 유휴시간이 있는 합성 시나리오로 전환합니다.'):
+        st.caption('아래 버튼은 지금까지의 진행 상태와 판단 기록을 지우고 선작업 시연 시나리오를 처음부터 시작합니다.')
+        if st.button('선작업 시연 시나리오로 처음부터 시작',type='primary',help='현재 운영 상태를 초기화하고 반입 전 유휴시간이 있는 합성 시나리오로 전환합니다.'):
             reset(o.config.model_copy(update={'preset':'premarshal_demo'}));goto('premarshal')
         with st.expander('추천을 보류하는 조건',expanded=True):
             st.write('크레인 작업 중 / 해당 블록 하차·진입 대기 / ETA 갱신 지연 또는 낮은 신뢰 점수 / 다음 작업까지 이동시간 + 2분 여유 부족 / 총 평가 비용 개선 부족 / 최근 10분 내 같은 화물 이동')
         return
     cid=rec.container_id;src=locate(o.yard,cid);options=rec.candidates[:3]
+    who=premarshal_beneficiary(o.yard,o.plan,cid)
+    focus=st.session_state.get('focus')
+    if who:
+        subject=f'대표 컨테이너 {who}' if who==focus else who
+        html(f'<div class="section-note"><strong>{subject}의 인출을 준비하기 위해 {cid}를 이동합니다.</strong> 이동 대상은 {cid}이고, 인출을 준비하는 화물은 {who}입니다. 대표 컨테이너 선택은 바뀌지 않습니다.</div>')
     selected=st.radio('선작업 대안',range(len(options)),format_func=lambda i:f'대안 {i+1} · {slot(options[i].stack,options[i].tier)}',horizontal=True)
     candidate=options[selected]
     left,right=st.columns([1.7,1])
     with left:
         with st.container(key='canvas'):
             panel('선작업 전후 위치','PRE-MARSHALLING',f'{cid} · {slot(*src)} → {slot(candidate.stack,candidate.tier)}')
-            chart(yard_figure(o,cid,(candidate.stack,candidate.tier),height=350),'premarshal_yard')
+            from ui.scene import coords,PITCH,DX,DY,DZ
+            x0,y0=coords(src[0]);x1,y1=coords(candidate.stack)
+            arrow=[(x0+DX/2,y0+DY/2,(src[1]-1)*PITCH+DZ),(x0+DX/2,y0+DY/2,3),(x1+DX/2,y1+DY/2,3),(x1+DX/2,y1+DY/2,(candidate.tier-1)*PITCH+DZ)]
+            # 노랑은 대표 컨테이너로 유지하고, 이동 대상은 화살표와 목적 위치(초록)로 구분합니다
+            chart(yard_figure(o,st.session_state.get('focus'),(candidate.stack,candidate.tier),height=350,arrow=arrow),'premarshal_yard')
+            st.caption(f'흰 화살표: 이동 대상 {cid}의 경로 · 반투명 초록: 목적 위치 · 노랑: 대표 컨테이너')
     with right:
         with st.container(key='focus'):
             panel('유휴시간에 앞당길 작업','REVIEW BEFORE MOVE')
-            html(f'<div class="focus-route"><span>{slot(*src)}</span><strong>→ {slot(candidate.stack,candidate.tier)}</strong></div><div class="detail-row"><span>작업 시간</span><b>{candidate.move_seconds/60:.1f}분</b></div><div class="detail-row"><span>인출 방해 해소 대상</span><b>{cid}</b></div><div class="detail-row"><span>평가 시나리오</span><b>{len(candidate.sample_scores)}회 · 공통 입력</b></div>')
+            html(f'<div class="focus-route"><span>{slot(*src)}</span><strong>→ {slot(candidate.stack,candidate.tier)}</strong></div><div class="detail-row"><span>작업 시간</span><b>{candidate.move_seconds/60:.1f}분</b></div><div class="detail-row"><span>이동 대상</span><b>{cid}</b></div><div class="detail-row"><span>인출을 준비하는 화물</span><b>{who or '—'}</b></div><div class="detail-row"><span>추천 평가</span><b>도착 상황 {len(candidate.sample_scores)}가지 가정 · 60분</b></div>')
             ready=cargo_panel(sim,cid,'pre_cargo')
             reason=st.selectbox('선작업 판단 사유',['유휴시간 활용·인출 방해 예방','현장 장비 동선 고려','다른 작업 우선'])
             if st.button('선작업 모의 승인',type='primary',width='stretch',disabled=not ready):
                 report=sim.approve(rec,selected)
                 if report.valid:
-                    record_approval(sim,rec,selected,reason,context_for(o,cid))
+                    record_approval(sim,rec,selected,reason)
                     st.session_state.review_log.append({'시각':tm(sim.now),'컨테이너':cid,'결정':'선작업 승인','위치':slot(candidate.stack,candidate.tier),'사유':reason,'추천ID':rec.recommendation_id})
                     goto('sync')
                 else:st.error(' · '.join(report.errors))
@@ -173,7 +170,7 @@ def premarshal_page(sim,chart,reset,goto):
 
 
 def sharing_page(sim):
-    driver,learning,notifications=st.tabs(['기사 하차 안내','현장 판단 학습','변경 알림'])
+    driver,notifications=st.tabs(['기사 하차 안내','역할별 변경 알림'])
     with driver:
         panel('승인한 배치가 기사 안내로','ALLCON-e / CONCEPT PREVIEW','올컨e 연계를 제안하는 독립적인 모의 화면입니다. 실제 알림은 전송되지 않습니다.')
         guides=list(st.session_state.guides.values())
@@ -194,33 +191,6 @@ def sharing_page(sim):
                         notify_demo(sim,'기사 안내 확인',f'{cid} · 하차 위치 확인 완료',('플래너','관제 담당자'));st.rerun()
                     st.download_button('기사 안내 JSON',json.dumps(g,ensure_ascii=False,indent=2),'driver_guide.json','application/json')
                     st.caption('블록·인계 지점을 안내합니다. 실제 도로 경로나 작업 지시로 사용하지 않는 시연 화면입니다.')
-    with learning:
-        records=st.session_state.feedback;model=st.session_state.trained_model
-        panel('현장의 선택을 다음 추천에','FEEDBACK → PREFERENCE MODEL','승인한 대안과 판단 사유를 저장하고, 실제 데모 선택 기록으로 경량 선호모델을 학습합니다.')
-        a,b,c=st.columns(3)
-        with a:metric('누적 판단 기록',len(records),'건','승인·대안 선택 기록','blue')
-        with b:metric('추천 외 선택',sum(r['chosen']!=0 for r in records),'건','현장 관리자가 선택한 다른 후보','amber')
-        with c:metric('학습 버전',model['version'] if model else '미학습','','자동 재학습 없이 검토 후 반영','teal')
-        if st.button('판단 기록으로 선호모델 학습',type='primary',disabled=not any(r['action']=='INITIAL' and len(r['candidates'])>1 for r in records)):
-            model=train_preferences(records);st.session_state.trained_model=model;st.session_state.training_ids=[r['id'] for r in records]
-            persist_event(st.session_state.session_id+model['version'],'model',model);st.session_state.pop('active_recommendation',None);st.rerun()
-        enabled=st.toggle('검토한 선호모델을 추천에 반영',key='learning_enabled',disabled=not model)
-        if model:
-            table(['학습 요소','선호 가중치'],[[label,f'{value:+.3f}'] for label,value in zip(FEATURE_LABELS,model['weights'])])
-            html(f'<div class="section-note">{model["records"]}건의 선택 · {model["pairs"]}쌍 비교로 학습했습니다. 물리 제약을 통과하고 기본 비용 차이가 5% 또는 60점 이내인 후보만, 같은 상황·화물 유형에서 재정렬합니다. 동등 후보가 없으면 순위가 유지됩니다.</div>')
-            pending=[cid for cid,c in sim.bundle.containers.items() if not c.initial and sim.statuses[cid] in ('EN_ROUTE','YARD_QUEUE','INTERNAL_TRAVEL','GATE_QUEUE')]
-            if pending:
-                cid=st.selectbox('학습 전후를 비교할 화물',pending)
-                o=sim.observe();base=recommend_slots(o,cid)
-                trained=[r for r in records if r['id'] in st.session_state.training_ids]
-                learned=personalize(base,model,context_for(o,cid),trained)
-                order={c.stack:i+1 for i,c in enumerate(learned.candidates)}
-                table(['후보 위치','기본 순위','학습 검토 순위','예상 재취급'],[[slot(c.stack,c.tier),str(i+1),str(order[c.stack]),f'{c.rehandles:.2f}회'] for i,c in enumerate(base.candidates[:3])])
-                st.caption('현재 화물의 실제 후보로 비교합니다. 같은 상황의 학습 기록이나 유사 비용 후보가 부족하면 기존 순위를 유지합니다.')
-        if records:
-            table(['컨테이너','상황','선택','판단 사유'],[[r['container'],escape(r['context']),f'대안 {r["chosen"]+1}',escape(r['reason'])] for r in records[-6:]])
-            st.download_button('학습 기록 JSON',json.dumps(records,ensure_ascii=False,indent=2),'planner_feedback.json','application/json')
-        st.caption('이 기능은 선택 기록 기반 선호학습 데모입니다. 딥러닝 운영모델·성능 향상을 검증한 기능은 아닙니다. 이 세션의 기록만 학습하며 로컬 SQLite에 저장하고 JSON으로 내보낼 수 있습니다. 클라우드 임시 디스크의 영구 보존은 보장되지 않습니다.')
     with notifications:
         role=st.radio('조회 역할',['플래너','관제 담당자','운송기사','선사'],horizontal=True)
         notices=[n for n in st.session_state.notices if role in n['roles']]

@@ -9,6 +9,13 @@ from services.recommend import recommend_slots,propose_premarshal
 
 PRIORITY={'MOVE_END':0,'GATE_SERVICE_END':0,'TRUCK_EXIT':0,'PLAN_UPDATE':1,'FORECAST_UPDATE':1,'TRUCK_ARRIVAL':2,'YARD_ARRIVAL':2,'WAKE':3}
 
+def premarshal_beneficiary(yard,plan,cid):
+    """선작업으로 옮기는 화물 아래에서 가장 먼저 인출할 화물(이 이동으로 인출을 준비하는 대상)."""
+    src=locate(yard,cid)
+    if not src:return None
+    below=[x for x in yard[src[0]][:src[1]-1] if rank(plan,x)<rank(plan,cid)]
+    return min(below,key=lambda x:rank(plan,x)) if below else None
+
 class Simulator:
     def __init__(self,bundle,policy='C'):
         report=validate_bundle(bundle)
@@ -23,6 +30,8 @@ class Simulator:
         self.headroom={};self.last_premarshal={};self.idle_used=set();self.accepted={}
         self.manual=False;self.manual_initial=False;self.queue=[];self.serial=0
         self.cargo_checks=set();self.eta_overrides=set()
+        # 수동 승인이 필요한 컨테이너(대표 컨테이너). 나머지는 같은 규칙으로 자동 처리합니다.
+        self.manual_ids=set();self.forecast_log={}
         self.run_id=f'{policy}-{stable_hash([bundle.config.model_dump(),bundle.truth_events,bundle.initial_yard])}'
         self.termination='RUNNING'
         for e in bundle.truth_events:self.push(e.at,e.kind,deepcopy(e.payload),e.event_id)
@@ -54,7 +63,9 @@ class Simulator:
         cid=p.get('container_id','')
         if kind=='FORECAST_UPDATE':
             f=p['forecast']
-            if self.statuses[f.container_id]=='EN_ROUTE' and f.container_id not in self.eta_overrides:self.forecasts[f.container_id]=f
+            if self.statuses[f.container_id]=='EN_ROUTE' and f.container_id not in self.eta_overrides:
+                old=self.forecasts.get(f.container_id);self.forecasts[f.container_id]=f
+                if old is None or abs(old.p50-f.p50)>=180:self.forecast_log.setdefault(f.container_id,[]).append(f)
         elif kind=='PLAN_UPDATE':
             new={x:PlanEntry(**entry) for x,entry in p['entries'].items()}
             for x,old in self.plan.items():
@@ -113,7 +124,7 @@ class Simulator:
             self.log('MOVE_END',cid,f"{job['move_type']} · {job['source_slot'] or 'GATE'} → {job['target_slot'] or 'VESSEL'}")
             assert_yard(self.yard,self.bundle.containers,self.config.stack_weight_limit)
 
-    def start_move(self,cid,kind,target=None,recommendation_id=None):
+    def start_move(self,cid,kind,target=None,recommendation_id=None,for_cid=None):
         c=self.bundle.containers[cid];b=c.block;source=locate(self.yard,cid)
         src=source[0] if source else None
         if self.cranes[b] or self.statuses[cid]=='IN_MOVE':return False
@@ -121,7 +132,7 @@ class Simulator:
         if kind!='INITIAL' and (not src or self.yard[src][-1]!=cid):return False
         if target and target not in feasible(self.observe(),cid,src,ignore_headroom=kind=='REHANDLE'):return False
         dt=duration(self.config,src,target)
-        job={'run_id':self.run_id,'move_id':f'M-{len(self.moves)+1:05d}','container_id':cid,'move_type':kind,'source_stack':src,'target_stack':target,'source_slot':slot(src,source[1]) if src else '', 'target_slot':slot(target,len(self.yard[target])+1) if target else '', 'start_at':self.now,'end_at':self.now+dt,'crane_id':f'YC-{b}','reason_code':'ACCESSIBILITY_GAIN' if kind=='PREMARSH' else 'PLAN_SEQUENCE' if kind in ('RETRIEVE','REHANDLE') else 'LOWEST_ROLLOUT_COST','plan_version':self.plan_version,'completed':False,'recommendation_id':recommendation_id,'retrieval_due_at':self.plan[cid].due if cid in self.plan else None}
+        job={'run_id':self.run_id,'move_id':f'M-{len(self.moves)+1:05d}','container_id':cid,'move_type':kind,'source_stack':src,'target_stack':target,'source_slot':slot(src,source[1]) if src else '', 'target_slot':slot(target,len(self.yard[target])+1) if target else '', 'start_at':self.now,'end_at':self.now+dt,'crane_id':f'YC-{b}','reason_code':'ACCESSIBILITY_GAIN' if kind=='PREMARSH' else 'PLAN_SEQUENCE' if kind in ('RETRIEVE','REHANDLE') else 'LOWEST_ROLLOUT_COST','plan_version':self.plan_version,'completed':False,'recommendation_id':recommendation_id,'retrieval_due_at':self.plan[cid].due if cid in self.plan else None,'for_container':for_cid or ''}
         self.moves.append(job);self.cranes[b]=job;self.statuses[cid]='IN_MOVE'
         # Reservations change recommendation validity even before occupancy commits.
         self.yard_version+=1
@@ -150,7 +161,7 @@ class Simulator:
             if ordered and self.plan[ordered[0]].due<=self.now:next_targets[self.bundle.containers[ordered[0]].block]=ordered[0]
         for b in self.cranes:
             if self.cranes[b]:continue
-            waiting=sorted((x for x in self.yard_arrivals if self.bundle.containers[x].block==b),key=lambda x:(self.yard_arrivals[x],x))
+            waiting=sorted((x for x in self.yard_arrivals if self.bundle.containers[x].block==b and x not in self.manual_ids),key=lambda x:(self.yard_arrivals[x],x))
             old_truck=bool(waiting and self.now-self.yard_arrivals[waiting[0]]>900)
             def unload():
                 if not waiting or self.manual_initial:return False
@@ -175,14 +186,14 @@ class Simulator:
                     blocker=self.yard[src][-1];o=self.observe();keys=feasible(o,blocker,src,ignore_headroom=True)
                     if keys:
                         dst=min(keys,key=lambda k:(sum(rank(self.plan,x)<rank(self.plan,blocker) for x in self.yard[k]),duration(self.config,src,k),k))
-                        if self.start_move(blocker,'REHANDLE',dst):continue
+                        if self.start_move(blocker,'REHANDLE',dst,for_cid=target):continue
                     else:self.log('BLOCKED_CAPACITY',target,'인출 재취급 목적지 없음')
             if unload():continue
             if self.policy=='C' and self.config.premarshal and not self.manual and b not in self.idle_used and not waiting:
                 rec=propose_premarshal(self.observe(),b)
                 if rec:
                     self.record_decision(rec,rec.candidates[0].stack)
-                    if self.start_move(rec.container_id,'PREMARSH',rec.candidates[0].stack):self.idle_used.add(b)
+                    if self.start_move(rec.container_id,'PREMARSH',rec.candidates[0].stack,for_cid=premarshal_beneficiary(self.yard,self.plan,rec.container_id)):self.idle_used.add(b)
 
     def advance(self,until=None,one_event=False):
         end=self.config.horizon+self.config.cleanup
@@ -221,7 +232,8 @@ class Simulator:
         self.accepted[rec.recommendation_id]={'status':'APPROVED','container_id':rec.container_id}
         self.log('APPROVED',rec.container_id,rec.recommendation_id)
         self.accepted[rec.recommendation_id]['status']='QUEUED';self.log('QUEUED',rec.container_id,rec.recommendation_id)
-        if self.start_move(rec.container_id,rec.action,c.stack,rec.recommendation_id):
+        beneficiary=premarshal_beneficiary(self.yard,self.plan,rec.container_id) if rec.action=='PREMARSH' else None
+        if self.start_move(rec.container_id,rec.action,c.stack,rec.recommendation_id,beneficiary):
             self.accepted[rec.recommendation_id]['status']='EXECUTING';self.record_decision(rec,c.stack,'APPROVED');self.snapshot()
         else:
             self.accepted.pop(rec.recommendation_id);return ValidationReport(['ACTION_REVALIDATION_FAILED'])

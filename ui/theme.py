@@ -168,3 +168,31 @@ CSS = CSS.replace('</style>', '''
 .app-table{display:table;}.st-key-connections .app-table td{white-space:normal;}.candidate{min-height:270px;}
 @media(max-width:700px){.quadrant-grid{grid-template-columns:1fr;}.phone{width:100%;}.app-table{display:block;overflow-x:auto;}}
 </style>''')
+
+# 대표 사례 흐름 · 3D 범례 · 체크리스트
+CSS = CSS.replace('</style>', '''
+.case-bar{display:flex;flex-wrap:wrap;gap:6px 22px;align-items:center;padding:12px 16px;border:1px solid #6b5a1f;border-radius:11px;background:linear-gradient(90deg,#2a2610,#111e2d 55%);margin:10px 0 12px;}
+.case-bar>div{display:flex;flex-direction:column;min-width:96px;}
+.case-bar span{font-size:10px;color:#9fb0c3;letter-spacing:.3px;}
+.case-bar b{font-size:14px;color:#f3f6fa;font-weight:620;}
+.case-bar .case-tag{background:#FFD12E;color:#1b1600;font-weight:750;font-size:11px;padding:4px 9px;border-radius:5px;min-width:auto;}
+.checklist{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:2px 0 12px;}
+.checklist>i{color:#46607a;font-style:normal;}
+.check{display:flex;align-items:center;gap:8px;padding:7px 11px;border:1px solid #2a3c52;border-radius:9px;background:#101d2d;font-size:12px;color:#c9d6e3;}
+.check span{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;border:1px solid #47607a;font-size:11px;color:#8ea5bb;}
+.check small{display:block;font-size:10px;color:#7f97ad;}
+.check.done{border-color:#2f6b5f;}.check.done span{background:#59e0ce;color:#08231f;border-color:#59e0ce;}
+.check.hold{border-color:#7a6230;}.check.hold span{background:#e6b877;color:#2a1d05;border-color:#e6b877;}
+.legend3d{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:11.5px;color:#c4d2df;margin-top:6px;}
+.legend3d i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px;border:1px solid #05080d;}
+.why{border:1px solid #2b4a5e;border-left:3px solid #59e0ce;background:#0f2130;border-radius:9px;padding:11px 13px;font-size:12.5px;line-height:1.75;color:#dbe6ef;margin:8px 0;}
+.why.danger{border-left-color:#E0474C;background:#2a1520;}
+.why .muted{color:#8ea3b6;font-size:11px;}
+.opt{border:1px solid #2a3c52;border-radius:10px;padding:10px 12px;margin:7px 0;background:#0f1b2a;}
+.opt.best{border-color:#2f6b5f;}.opt.sel{box-shadow:0 0 0 2px #3DDC9766;}
+.opt-head{display:flex;gap:8px;align-items:center;font-size:12.5px;}.opt-head span{margin-left:auto;font-family:ui-monospace,monospace;color:#e9f1f8;}
+.opt-what{font-size:12px;color:#cfe0ee;margin-top:5px;}.opt-why{font-size:11.5px;color:#93a9bd;margin-top:3px;}
+.opt-nums{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:11.5px;color:#9fb3c6;margin-top:6px;}.opt-nums b{color:#f1f6fb;}
+.st-key-focus .app-table td{white-space:normal;line-height:1.55;}
+.app-table .good{color:#59e0ce;font-weight:600;}.app-table .bad{color:#ee99a4;font-weight:600;}
+</style>''')

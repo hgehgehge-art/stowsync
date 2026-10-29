@@ -3,11 +3,20 @@ import random
 from dataclasses import asdict
 from domain.models import Config, Container, Forecast, PlanEntry, Event, ScenarioBundle, ValidationReport, stack_keys
 
+# 대표 사례(story) 시나리오의 고정 사건: 시작 후 STORY_UPDATE초에 ETA가 지연으로 갱신되고 STORY_ARRIVAL초에 게이트 도착
+STORY_UPDATE = 1500
+STORY_ARRIVAL = 2700
+STORY_DELAY = 1500
+STORY_LOAD_START = 4200
+STORY_B_ARRIVAL = 1900
+STORY_PLAN_AT = 600
+
 def build_scenario(config: Config, seed=None) -> ScenarioBundle:
     cfg = config.model_copy(update={"seed": config.seed if seed is None else seed})
     rng = random.Random(cfg.seed)
     occupancy = .78 if cfg.preset == "capacity" else cfg.occupancy
     initial_count = min(cfg.target_count - 4, 40, round(48 * occupancy))
+    story = cfg.preset == "story"
     containers, yard, plan, forecasts, events = {}, {k: [] for k in stack_keys()}, {}, [], []
     n = cfg.target_count
     for i in range(n):
@@ -24,6 +33,8 @@ def build_scenario(config: Config, seed=None) -> ScenarioBundle:
         if cfg.preset.startswith("late"): booking = arrival - 1500
         if cfg.preset == "surprise" and i == initial_count: arrival, booking = 35, 1600
         if cfg.preset == "cutoff" and i >= n-5: arrival = 11000 + (i-n+5)*90
+        if story and i == initial_count: arrival, booking = STORY_ARRIVAL, STORY_ARRIVAL - STORY_DELAY
+        if story and i == initial_count + 4: arrival = booking = STORY_B_ARRIVAL
         cargo='위험물' if i==initial_count+1 else '환적' if i==initial_count+2 else '일반'
         containers[cid] = Container(cid, "OCEAN HARMONY", block, max(0, booking-300), max(600, booking+300), round(rng.uniform(12, 25), 1), initial, cargo_type=cargo, hazard_class='3 · 모의' if cargo=='위험물' else '', connecting_vessel='PACIFIC LINK' if cargo=='환적' else '')
         if initial:
@@ -38,6 +49,9 @@ def build_scenario(config: Config, seed=None) -> ScenarioBundle:
             err_scale = cfg.eta_error * (2.6 if cfg.preset == "uncertain" else 1)
             for observed in range(0, arrival, 300):
                 bias = rng.gauss(0, err_scale * max(.22, (arrival-observed)/max(arrival,1)))
+                if story and i == initial_count:
+                    # 운송 초반에는 예약대로 온다고 예측하다가, STORY_UPDATE 이후 지연 도착으로 갱신됨
+                    bias = -STORY_DELAY if observed < STORY_UPDATE else rng.gauss(0, 120)
                 if cfg.preset == "surprise" and i == initial_count: bias = 1800
                 mid = max(observed, int(arrival + bias))
                 width = max(120, int(err_scale*.7))
@@ -46,11 +60,20 @@ def build_scenario(config: Config, seed=None) -> ScenarioBundle:
         due = 1800 + i * 110
         if i >= initial_count: due = max(due, arrival + 900)
         plan[cid] = PlanEntry(cid, i+1, due, 1+i//20)
-    if cfg.preset.endswith("priority"):
-        focus = list(containers)[initial_count]
+    if cfg.preset.endswith("priority") or story:
+        ids = list(containers)
+        focus = ids[initial_count]
         ordered = [focus] + [x for x in containers if x != focus]
-        plan = {cid: PlanEntry(cid, j+1, 1800+j*110, 1+j//20) for j,cid in enumerate(ordered)}
-    if cfg.plan_changes or cfg.preset == "reversal":
+        if story:
+            # 대표 A는 인출 4번째(선적 상위). A보다 먼저 인출할 B(반입 예정)가 A 도착 전에 들어옴
+            early = [x for x in ids if containers[x].initial and containers[x].block == containers[focus].block][:2]
+            b_box = ids[initial_count + 4]
+            head = [early[0], b_box, early[1], focus]
+            ordered = head + [x for x in ids if x not in head]
+        # story: 본선 인출은 대표 컨테이너 도착 뒤(STORY_LOAD_START)에 시작. 대표 컨테이너가 인출 순서 1번(선적 상위)
+        start = STORY_LOAD_START if story else 1800
+        plan = {cid: PlanEntry(cid, j+1, start+j*110, 1+j//20) for j,cid in enumerate(ordered)}
+    if (cfg.plan_changes and not story) or cfg.preset == "reversal":
         ordered = list(plan)
         # Publish all changes at 35 minutes; never leak them to earlier observations.
         future = ordered[12:]

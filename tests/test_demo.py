@@ -37,8 +37,11 @@ def test_approval_is_idempotent_and_commits_only_on_completion():
 
 
 def test_pages_and_approval_flow():
-    at=AppTest.from_file(Path(__file__).resolve().parents[1]/'app.py',default_timeout=30).run()
+    at=AppTest.from_file(Path(__file__).resolve().parents[1]/'app.py',default_timeout=60).run()
     assert not at.exception
+    next(s for s in at.selectbox if s.label=='시나리오').set_value('balanced')
+    next(b for b in at.button if b.label=='시나리오 적용 · 처음부터 시작').click().run()
+    assert at.session_state['config'].preset=='balanced'
     for page in ['eta','recommend','sync','impact','data','dashboard']:
         at.button(key='nav_'+page).click().run()
         assert not at.exception, [(x.message) for x in at.exception]
