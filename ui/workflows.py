@@ -205,7 +205,7 @@ def sharing_page(sim):
 
 def connections_panel(sim):
     with st.container(key='connections'):
-        panel('9개 터미널 통합 선석 일정','PORT-i → TOS','접안 예정과 개별 컨테이너 인출 순서는 구분합니다.')
+        panel('9개 터미널 통합 선석 일정','선박 일정 → TOS','접안 예정과 개별 컨테이너 인출 순서는 구분합니다.')
         rows=terminal_feed(sim)
         table(['터미널','선박','접안 예정','변동','혼잡 참고'],[[r['터미널'],r['선박'],tm(r['접안 예정']),f'{r["변동(분)"]:+d}분',f'{r["혼잡도"]}%'] for r in rows])
         a,b=st.columns([1,1])

@@ -165,7 +165,7 @@ def test_pages_keep_state_and_removed_items_are_gone():
         assert at.session_state['story_sim'].now == now
     root = APP.parent
     src = ''.join(p.read_text(encoding='utf-8') for p in list(root.glob('*.py')) + list((root / 'ui').glob('*.py')))
-    assert 'Port-i' not in src and '계획 변경 대응' not in src and '대표 사례 흐름' not in src
+    assert 'port-i' not in src.lower() and '계획 변경 대응' not in src and '대표 사례 흐름' not in src
     assert '선택 화물 보기' not in src
 
 
