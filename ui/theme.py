@@ -298,6 +298,9 @@ CSS = CSS.replace('</style>', '''
 [class*="st-key-scnstep-cur"] button{background:#173737;border:2px solid #59e0ce;color:#e9fffb;font-weight:700}
 [class*="st-key-scnstep-"] button:hover:not(:disabled){background:#1b2c40}
 [class*="st-key-scnstep-"] button:disabled{opacity:.45}
+.st-key-scnsteps [data-testid="stHorizontalBlock"]{display:grid !important;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:8px 12px}
+.st-key-scnsteps [data-testid="stColumn"]{width:auto !important;min-width:0 !important;flex:none !important}
+[class*="st-key-scnstep-"] button p{white-space:nowrap;word-break:keep-all}
 .scn-guide{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:6px 0 12px}
 .scn-guide>div{border:1px solid #26354a;border-radius:10px;padding:10px 14px;background:#101d2d}
 .scn-guide span{display:block;font-size:11px;color:#8fa3b9;margin-bottom:3px}.scn-guide b{font-size:13.5px;color:#e6edf5;font-weight:600}

@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, model_validator
 VERSION = "stowsync-2.0.0"
 ASSUMPTIONS = "synthetic-2026-10-v1"
 START_ISO = "2026-10-09T09:00:00+09:00"
-POLICIES = {"A": "예약 기반", "B": "ETA 기반", "C": "ETA + 사전 재배치"}
+POLICIES = {"A": "예약 기반", "B": "ETA 기반", "C": "ETA + 선작업"}
 PRESETS = {
     "story": "대표 컨테이너 흐름 · 20개",
     "balanced": "균형 운영 · 기본 시나리오",

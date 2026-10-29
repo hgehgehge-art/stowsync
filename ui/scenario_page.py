@@ -90,7 +90,9 @@ def new_job(reset, jump=True):
 
 # ── 공통 화면 요소 ─────────────────────────────────────
 def stepper(cur, top):
-    cols = st.columns(len(STEPS))
+    # scnsteps: 좁은 화면에서 단계 버튼이 글자 단위로 끊기거나 세로로 쌓이지 않고 여러 줄로 감기도록 감쌉니다(theme.py).
+    with st.container(key='scnsteps'):
+        cols = st.columns(len(STEPS))
     for i, (col, name) in enumerate(zip(cols, STEPS)):
         state = 'cur' if i == cur else 'done' if (i < cur or (top >= 5 and i <= 5)) and i != 6 else 'todo'
         lock = i > top and i != 6
@@ -103,6 +105,13 @@ def stepper(cur, top):
     see, do, get = GUIDE[cur]
     html(f'<div class="scn-guide"><div><span>확인할 내용</span><b>{escape(see)}</b></div>'
          f'<div><span>할 일</span><b>{escape(do)}</b></div><div><span>결과</span><b>{escape(get)}</b></div></div>')
+
+
+def saved_text(v):
+    """기준안 대비 변화. 양수(절감)는 '단축', 음수는 '증가'로 씁니다. '+2.4분'이 늘어난 것처럼 읽히지 않게 합니다."""
+    if v is None:
+        return '—'
+    return '변화 없음' if abs(v) < .05 else (f'{v:.1f}분 단축' if v > 0 else f'{-v:.1f}분 증가')
 
 
 def nav(cur, top, next_label=None, next_disabled=False, on_next=None):
@@ -256,10 +265,10 @@ def step_compare(sim, story, top):
         rows.append([('★ ' if a['rank'] == 1 else '') + f'{a["rank"]}안' + (' (추천 1위)' if a['rank'] == 1 else '') + f'<br><small>{alt_kind(a, base)}</small>',
                      sv.order_text(a['option']['order'], labels), f'{r["total_min"]:.1f}분', f'{r["move_min"]:.1f}분',
                      f'{r["wait_min"]:.1f}분', f'{a["delta"]["rehandles"][0]:.1f}회',
-                     f'<span class="{"good" if saved > .05 else "bad" if saved < -.05 else ""}">{saved:+.1f}분</span>'])
+                     f'<span class="{"good" if saved > .05 else "bad" if saved < -.05 else ""}">{saved_text(saved)}</span>'])
     with st.container(key='altcompare'):
         panel('대안별 비교', subtitle='같은 초기 상태(지금 이 순간)에서 대안마다 하차를 실제로 실행해 계산한 값입니다.')
-        table(['대안', '처리 순서', '하차 완료까지 작업시간', '장비 이동시간', '트럭 대기 합계', '예상 재취급(야드·60분)', '기준 대비 절감'], rows)
+        table(['대안', '처리 순서', '하차 완료까지 작업시간', '장비 이동시간', '트럭 대기 합계', '예상 재취급(야드·60분)', '기준 대비 작업시간'], rows)
         st.caption('작업시간 = 지금부터 세 트럭의 하차가 모두 끝날 때까지. 장비 이동시간 = 그동안 크레인이 움직인 시간(하차·재취급·인출 포함). '
                    '예상 재취급 = 도착 시각 8가지 가정 · 앞으로 60분 · 야드 전체 평균. 규칙상 놓을 곳이 없는 순서는 대안에서 뺍니다.')
     # 대안 카드(선택)
@@ -272,7 +281,7 @@ def step_compare(sim, story, top):
                 html(f'<div class="alt-head"><b>{escape(alt_name(a, labels))}</b>{badge("추천 1위", "") if a["rank"] == 1 else ""}{badge(alt_kind(a, base), "blue")}'
                      f'{badge("선택됨", "amber") if sel else ""}</div>'
                      f'<div class="alt-pos">{escape(pos)}</div>'
-                     f'<div class="alt-big">{r["total_min"]:.1f}<small>분</small><span>기준 대비 {br["total_min"] - r["total_min"]:+.1f}분</span></div>')
+                     f'<div class="alt-big">{r["total_min"]:.1f}<small>분</small><span>기준 대비 {saved_text(br["total_min"] - r["total_min"])}</span></div>')
                 if st.button('✓ 선택됨' if sel else '이 대안 선택', key=f'alt_pick_{a["rank"]}', width='stretch',
                              type='secondary' if sel else 'primary', disabled=sel):
                     story['alt'] = k; st.session_state.pop('scn_play', None); st.rerun()
@@ -283,6 +292,11 @@ def step_compare(sim, story, top):
          f'(기준 {br["total_min"]:.1f}분 → {t1["total_min"]:.1f}분), 장비 이동시간이 {br["move_min"] - t1["move_min"]:.1f}분 짧습니다. '
          f'앞으로 60분 예상 재취급은 {top1["delta"]["rehandles"][1]:.1f}회 → {top1["delta"]["rehandles"][0]:.1f}회입니다. '
          + escape(next((r['why'] for r in seq.reasons(sim, top1['option'], base['option']) if r['cid'] == cid), '')) + '</div>')
+    if len(alts['options']) > 1:
+        # 표의 실행 결과가 같아도 순위는 도착 상황 표본 전체의 종합 점수(J)로 정해집니다.
+        sc = ' · '.join(f'{a["rank"]}안 {a["option"]["J"]:,.0f}점' for a in alts['options'])
+        st.caption(f'순위 기준 · 도착 상황 {alts["res"]["samples"]}가지 표본에서 계산한 종합 점수 J(추가 이동 작업시간·트럭 대기·인출 지연·인출 가로막힘의 가중합, '
+                   f'낮을수록 좋음): {sc}. 위 표의 실행 결과가 같은 대안도 이 점수로 순위가 갈립니다.')
     simulation_player(sim, story, pick, base, labels)
     with st.expander('대안별 화물 처리 근거(계산)'):
         for a in alts['options']:
@@ -344,7 +358,7 @@ def simulation_player(sim, story, a, base, labels):
                 done = i >= len(steps) - 1
                 br = base['run']
                 html(f'<div class="why"><b>{"실행 완료" if done else "실행 중"}</b> · 하차 완료까지 {run["total_min"]:.1f}분 '
-                     f'(기준안 {br["total_min"]:.1f}분, <b>{br["total_min"] - run["total_min"]:+.1f}분</b>) · 장비 이동 {run["move_min"]:.1f}분 · '
+                     f'(기준안 {br["total_min"]:.1f}분, <b>{saved_text(br["total_min"] - run["total_min"])}</b>) · 장비 이동 {run["move_min"]:.1f}분 · '
                      f'재취급 {run["rehandles"]}회</div>')
         frame()
 
@@ -352,7 +366,7 @@ def simulation_player(sim, story, a, base, labels):
 def locked_summary(story):
     d = story['decision']
     if d['type'] == 'approve':
-        html(f'<div class="why"><b>승인한 대안</b> · {escape(d["label"])} · 하차 완료까지 {d["total_min"]:.1f}분(기준 대비 {d["saved_min"]:+.1f}분)</div>')
+        html(f'<div class="why"><b>승인한 대안</b> · {escape(d["label"])} · 하차 완료까지 {d["total_min"]:.1f}분(기준 대비 {saved_text(d["saved_min"])})</div>')
     else:
         html(f'<div class="why"><b>보류</b> · {escape(d.get("label", ""))}</div>')
 
@@ -477,7 +491,7 @@ def step_approve(sim, story, top, log_decision):
             _, tiers = yard_after(o, a['option'])
             table(['순서', '라벨', '컨테이너', '내릴 위치'], [[str(i), labels[c], escape(c) + (' (대표)' if c == cid else ''), slot(*tiers[c])]
                                                      for i, c in enumerate(a['option']['order'], 1)])
-            html(f'<div class="why"><b>예상 결과</b> · 하차 완료까지 {r["total_min"]:.1f}분 (기준안 {base["run"]["total_min"]:.1f}분 대비 <b>{saved:+.1f}분</b>) · '
+            html(f'<div class="why"><b>예상 결과</b> · 하차 완료까지 {r["total_min"]:.1f}분 (기준안 {base["run"]["total_min"]:.1f}분 대비 <b>{saved_text(saved)}</b>) · '
                  f'장비 이동 {r["move_min"]:.1f}분 · 앞으로 60분 예상 재취급 {a["delta"]["rehandles"][0]:.1f}회(기준 {a["delta"]["rehandles"][1]:.1f}회)</div>')
     with right:
         with st.container(key='review'):
@@ -526,7 +540,7 @@ def approve(sim, story, alts, a, reason, log_decision):
     compare = compare_orders(pre, base_plan, cmp_plan, cid, story['other'])
     pos = locate(sim.yard, cid)
     saved = base['run']['total_min'] - a['run']['total_min']
-    basis = (f'기준안 대비 하차 완료 {saved:+.1f}분, 예상 재취급 {a["delta"]["rehandles"][1]:.1f}→{a["delta"]["rehandles"][0]:.1f}회'
+    basis = (f'기준안 대비 하차 완료 {saved_text(saved)}, 예상 재취급 {a["delta"]["rehandles"][1]:.1f}→{a["delta"]["rehandles"][0]:.1f}회'
              + (' · 추천 1위' if a['rank'] == 1 else f' · 추천 {a["rank"]}위(담당자 선택)'))
     reason_txt = '' if reason == REASONS[0] else reason
     km, cm = compare['keep']['result'].metrics, compare['chosen']['result'].metrics
@@ -591,7 +605,7 @@ def step_result(sim, story, top):
             table(['라벨', '컨테이너', '적치 위치', '완료', '현재'], rows)
             html(f'<div class="kpis"><div><span>하차 완료까지</span><b>{d["total_min"]:.1f}분</b></div>'
                  f'<div><span>기준안</span><b>{d["base_total_min"]:.1f}분</b></div>'
-                 f'<div class="hl"><span>절감</span><b>{d["saved_min"]:+.1f}분</b></div></div>')
+                 f'<div class="hl"><span>기준안 대비</span><b>{saved_text(d["saved_min"])}</b></div></div>')
             html(f'<div class="why"><b>판단 근거</b> · {escape(d["basis"])}' + (f'<br>사유: {escape(d["reason"])}' if d['reason'] else '') + '</div>')
     cmp = story.get('compare')
     if cmp:
@@ -631,7 +645,7 @@ def step_history(sim, story, top, reset):
             panel(f'상세 · {j["job_id"]}')
             detail = [['작업 시각(운영)', j['sim_time']], ['출처', j['source']], ['선택한 컨테이너', j['container']], ['최종 승인한 대안', j['approved']],
                       ['컨테이너 처리 순서', j['order_text']], ['예상 총 작업시간', f'{j["total_min"]}분' if j['total_min'] is not None else '—'],
-                      ['기준 대안 대비 절감', f'{j["saved_min"]:+}분' if j['saved_min'] is not None else '—'],
+                      ['기준 대안 대비', saved_text(j['saved_min'])],
                       ['판단 근거·사유', j['reason'] or '—'], ['작업 상태', j['status']]]
             for k, v in (j['detail'] or {}).items():
                 detail.append([k, str(v)])

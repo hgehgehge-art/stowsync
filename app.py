@@ -378,15 +378,39 @@ def sync_page():
     if st.session_state.review_log:
         st.download_button('판단 이력 CSV',csv_bytes(st.session_state.review_log),'stowsync_decisions.csv','text/csv',icon=':material/download:')
 
+def robustness_panel():
+    """한 번 실행(Seed 1개)이 아니라 여러 조건에서 정책이 어떻게 달라지는지 요약합니다. 기획서 2.6의 근거와 같은 값입니다."""
+    from services.robustness import summarize
+    r=summarize()
+    if not r:return
+    with st.container(key='robustness'):
+        panel('다조건 요약 · 예약 기반 vs ETA + 선작업','ROBUSTNESS',
+              f'점유율 {" · ".join(f"{x:.0%}" for x in r["occupancy"])} × ETA 오차 {" · ".join(f"{e}분" for e in r["errors_min"])} × 시드 {r["seeds"]}개 = {r["conditions"]}개 합성 조건. 같은 시드(같은 도착 사건)끼리 짝지어 비교했습니다.')
+        rows=[]
+        for m in r['rows']:
+            d=m['pct'];txt='변화 없음' if abs(d)<.05 else f'{abs(d):.1f}% {"감소" if d<0 else "증가"}'
+            rows.append([m['label'],f'{m["a"]:.2f}{m["unit"]}',f'{m["c"]:.2f}{m["unit"]}',f'<b>{txt}</b>',str(m['less']),str(m['same']),str(m['more'])])
+        table(['지표(조건 평균)','예약 기반','ETA + 선작업','변화','줄어든 조건','같음','늘어난 조건'],rows)
+        st.caption(f'ETA + 선작업 정책은 조건당 평균 {r["premarshal_mean"]:.1f}회의 선작업을 포함합니다. 트럭 대기와 인출 지연은 대체로 줄었지만, 총 추가 이동은 줄어든 조건과 늘어난 조건이 비슷해 '
+                   '재취급 감소는 실데이터 PoC에서 검증할 과제입니다. ETA 오차가 20분으로 커지면 차이가 거의 사라집니다. 점유율 65%는 야드 포화로 미완료가 많아 제외했습니다. '
+                   '원자료: docs/multiseed.csv · 생성: tools/multiseed.py')
+
+
 def impact_page():
     source_strip();a=results['A'].metrics;b=results['B'].metrics;c=results['C'].metrics
     html('<div class="section-note"><strong>별도 자동 실험</strong> · 같은 사건(40개 화물)에 세 정책을 자동으로 적용한 결과입니다. 대표 시나리오에서 승인한 작업의 결과는 대표 시나리오의 결과 확인 단계에서 봅니다.</div>')
     complete=all(results[p].metrics['incomplete']==0 for p in 'ABC')
-    gain=(a['extra_moves']-c['extra_moves'])/a['extra_moves']*100 if a['extra_moves'] else None
+    def change(new,base,unit):
+        # '+10%'가 늘어난 것처럼 읽히지 않도록 감소·증가를 말로 씁니다.
+        if base is None or new is None:return '—'
+        if unit=='분':new,base=round(new,1),round(base,1)   # 카드에 보이는 반올림 값끼리 비교합니다(2.5→2.2는 0.3분).
+        d=new-base
+        if unit=='%':d=d/base*100 if base else 0
+        return '변화 없음' if abs(d)<.05 else f'{abs(d):.1f}{unit} {"감소" if d<0 else "증가"}'
     cs=st.columns(4)
-    with cs[0]:metric('총 추가 이동',c['extra_moves'],'회',f'예약 기반 {a["extra_moves"]}회 · 선작업 포함','teal')
-    with cs[1]:metric('총 추가 이동 변화',f'{gain:+.1f}' if gain is not None else '—','%', '양수: 감소 / 음수: 증가','teal' if gain is not None and gain>=0 else 'coral')
-    with cs[2]:metric('평균 트럭 대기',mins(c['truck_wait']['mean']),'분',f'예약 기반 {mins(a["truck_wait"]["mean"])}분','amber')
+    with cs[0]:metric('평균 트럭 대기 · ETA + 선작업',mins(c['truck_wait']['mean']),'분',f'예약 기반 {mins(a["truck_wait"]["mean"])}분 대비 {change(c["truck_wait"]["mean"]/60,a["truck_wait"]["mean"]/60,"분")}','teal' if c['truck_wait']['mean']<=a['truck_wait']['mean'] else 'coral')
+    with cs[1]:metric('평균 인출 지연 · ETA + 선작업',mins(c['retrieval_delay']['mean']),'분',f'예약 기반 {mins(a["retrieval_delay"]["mean"])}분 대비 {change(c["retrieval_delay"]["mean"]/60,a["retrieval_delay"]["mean"]/60,"분")}','teal' if c['retrieval_delay']['mean']<=a['retrieval_delay']['mean'] else 'coral')
+    with cs[2]:metric('총 추가 이동 · ETA + 선작업',c['extra_moves'],'회',f'예약 기반 {a["extra_moves"]}회 대비 {change(c["extra_moves"],a["extra_moves"],"%")} · 선작업 포함','teal' if c['extra_moves']<=a['extra_moves'] else 'coral')
     with cs[3]:metric('대상 인출 완료',c['RETRIEVE'],f'/ {cfg.target_count}개',f'미완료 {c["incomplete"]}개 · 마감 예외 {c["exceptions"]}개','blue')
     left,right=st.columns([1,1])
     with left:
@@ -404,6 +428,7 @@ def impact_page():
             m=results[p].metrics
             rows.append([POLICIES[p],str(m['REHANDLE']),str(m['PREMARSH']),f'<b>{m["extra_moves"]}</b>',mins(m['truck_wait']['mean']),mins(m['retrieval_delay']['mean']),str(m['incomplete'])])
         table(['정책','재취급 / 회','선작업 / 회','총 추가 이동 / 회','평균 대기 / 분','평균 인출 지연 / 분','미완료 / 개'],rows)
+    robustness_panel()
     if not complete:
         st.warning('미완료 작업이 있습니다. 이동 감소율만으로 정책 우열을 판단할 수 없습니다. 공간 부족·마감 예외를 함께 확인해 주세요.')
     html('<div class="section-note"><strong>검증 범위</strong> · 세 정책은 같은 실제 도착 사건과 계획 변경을 사용합니다. 예약 기반 정책은 비교용 기준 규칙이며 실제 터미널 TOS를 대표하지 않습니다. 한 번 실행한 결과는 Seed에 따라 정책 순위가 바뀔 수 있습니다.</div>')

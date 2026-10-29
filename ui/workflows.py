@@ -112,20 +112,56 @@ def exceptions_page(sim,choose,chart,goto):
     if st.button('이 화물의 배치 검토',type='primary'):goto('dashboard')
 
 
+def is_harmful(rec,c):
+    """종합 비용이 좋아져도 재취급 + 선작업이 현행 유지보다 많아지면 손해 보는 선작업입니다."""
+    return c.rehandles+c.premarshals>rec.keep_rehandles+1e-9
+
+
+def gain_text(v):
+    return '변화 없음' if abs(v)<.05 else (f'{v:.1f}점 개선' if v>0 else f'{-v:.1f}점 악화')
+
+
+def premarshal_table(rec):
+    rows=[['현행 유지',f'{rec.keep_rehandles:.2f}','0.00',f'{rec.keep_rehandles:.2f}','기준','—']]
+    for i,c in enumerate(rec.candidates[:3]):
+        verdict=badge('보류 권장 · 총 추가 이동 증가','coral') if is_harmful(rec,c) else badge('검토 가능','')
+        rows.append([f'대안 {i+1}',f'{c.rehandles:.2f}',f'{c.premarshals:.2f}',f'{c.rehandles+c.premarshals:.2f}',gain_text(rec.keep_score-c.score),verdict])
+    table(['선택','예상 재취급 / 회','선작업 / 회','총 추가 이동 / 회','종합 비용(기준 대비)','판단'],rows)
+    st.caption('60분·공통 도착 시나리오 평균. 총 추가 이동 = 재취급 + 선작업. 최초 적치·본선 인출은 제외합니다. 종합 비용에는 대기·지연도 포함됩니다. '
+               '종합 비용이 좋아져도 총 추가 이동이 현행 유지보다 늘어나는 대안은 손해 보는 선작업일 수 있어 「보류 권장」으로 표시합니다.')
+
+
+def premarshal_preview(config):
+    """현재 운영 상태를 건드리지 않고, 선작업 검토 시나리오의 첫 장면을 별도로 계산해 보여 줍니다."""
+    from adapters.mock import build_scenario
+    from engine.simulator import Simulator
+    cfg=config.model_copy(update={'preset':'premarshal_demo'})
+    key=('premarshal_preview',cfg.model_dump_json())
+    if st.session_state.get('premarshal_preview_key')!=key:
+        demo=Simulator(build_scenario(cfg),'C');demo.manual=True;demo.manual_initial=True;demo.advance(0)
+        st.session_state.premarshal_preview=propose_premarshal(demo.observe());st.session_state.premarshal_preview_key=key
+    return st.session_state.premarshal_preview
+
+
 def premarshal_page(sim,chart,reset,goto):
     o=sim.observe();rec=propose_premarshal(o)
-    html('<div class="section-note"><strong>선작업도 이동 비용입니다.</strong> · 재취급 감소와 선작업 증가를 함께 계산하고, 장비 유휴시간·ETA 품질·예상 작업 개선 조건을 통과한 경우에만 추천합니다.</div>')
+    html('<div class="section-note"><strong>선작업도 이동 비용입니다.</strong> · 재취급 감소와 선작업 증가를 함께 계산하고, 장비 유휴시간·ETA 품질·예상 작업 개선 조건을 통과한 경우에만 추천합니다. 총 추가 이동이 늘어나는 대안은 「보류 권장」으로 표시합니다.</div>')
     a,b,c=st.columns(3)
     with a:metric('가용 크레인',sum(j is None for j in sim.cranes.values()),'/ 2','현재 작업을 중단하지 않음','blue')
     with b:metric('추천 상태','검토 가능' if rec else '대기','','도착 대기·ETA·유휴시간 재검증','teal' if rec else 'amber')
     with c:metric('ETA 입력 품질 기준',o.config.min_eta_trust,'점','규칙 기반 점수 · 확률 아님 · 가정값','blue')
     if not rec:
         st.info('현재 안전하게 앞당길 선작업이 없습니다. 필수 작업·하차 대기·예측 불확실성이 있거나, 이동 비용을 포함한 개선 조건을 충족하지 못했습니다.')
-        st.caption('아래 버튼은 지금까지의 진행 상태와 판단 기록을 지우고 선작업 검토 시나리오를 처음부터 시작합니다.')
-        if st.button('선작업 검토 시나리오로 처음부터 시작',type='primary',help='현재 운영 상태를 초기화하고 반입 전 유휴시간이 있는 시나리오로 전환합니다.'):
-            reset(o.config.model_copy(update={'preset':'premarshal_demo'}));goto('premarshal')
         with st.expander('추천을 보류하는 조건',expanded=True):
             st.write('크레인 작업 중 / 해당 블록 하차·진입 대기 / ETA 갱신 지연 또는 낮은 입력 품질 점수(65점 미만) / 다음 작업까지 이동시간 + 2분 여유 부족 / 총 평가 비용 개선 부족 / 최근 10분 내 같은 화물 이동')
+        preview=premarshal_preview(o.config)
+        if preview:
+            panel('미리보기 · 선작업 검토 시나리오','PREVIEW',
+                  f'현재 운영 상태는 바뀌지 않습니다. 반입 전 유휴시간이 있는 장면에서 {preview.container_id}를 미리 옮길지 계산한 결과입니다.')
+            premarshal_table(preview)
+        st.caption('아래 버튼은 지금까지의 진행 상태와 판단 기록을 지우고 선작업 검토 시나리오를 처음부터 시작합니다. 미리보기의 대안을 직접 승인·보류하려면 이 버튼을 누르세요.')
+        if st.button('선작업 검토 시나리오로 처음부터 시작',type='primary',help='현재 운영 상태를 초기화하고 반입 전 유휴시간이 있는 시나리오로 전환합니다.'):
+            reset(o.config.model_copy(update={'preset':'premarshal_demo'}));goto('premarshal')
         return
     cid=rec.container_id;src=locate(o.yard,cid);options=rec.candidates[:3]
     who=premarshal_beneficiary(o.yard,o.plan,cid)
@@ -133,8 +169,11 @@ def premarshal_page(sim,chart,reset,goto):
     if who:
         subject=f'대표 컨테이너 {who}' if who==focus else who
         html(f'<div class="section-note"><strong>{subject}의 인출을 준비하기 위해 {cid}를 이동합니다.</strong> 이동 대상은 {cid}이고, 인출을 준비하는 화물은 {who}입니다. 대표 컨테이너 선택은 바뀌지 않습니다.</div>')
-    selected=st.radio('선작업 대안',range(len(options)),format_func=lambda i:f'대안 {i+1} · {slot(options[i].stack,options[i].tier)}',horizontal=True)
+    selected=st.radio('선작업 대안',range(len(options)),format_func=lambda i:f'대안 {i+1} · {slot(options[i].stack,options[i].tier)}'+(' · 보류 권장' if is_harmful(rec,options[i]) else ''),horizontal=True)
     candidate=options[selected]
+    if is_harmful(rec,candidate):
+        st.warning(f'보류 권장 · 대안 {selected+1}은 총 추가 이동이 {candidate.rehandles+candidate.premarshals:.2f}회로 현행 유지({rec.keep_rehandles:.2f}회)보다 많습니다. '
+                   '대기·지연 개선으로 종합 비용은 좋아지지만 이동 부담이 늘어나는 선작업입니다. 승인 전에 현장 판단이 필요합니다.')
     left,right=st.columns([1.7,1])
     with left:
         with st.container(key='canvas'):
@@ -162,10 +201,7 @@ def premarshal_page(sim,chart,reset,goto):
                 st.session_state.review_log.append({'시각':tm(sim.now),'컨테이너':cid,'결정':'선작업 보류','위치':'—','사유':reason,'추천ID':rec.recommendation_id})
                 goto('sync')
     panel('그대로 둘 때와 미리 옮길 때','TOTAL EXTRA MOVES')
-    rows=[['현행 유지',f'{rec.keep_rehandles:.2f}','0.00',f'{rec.keep_rehandles:.2f}','기준']]
-    for i,c in enumerate(options):rows.append([f'대안 {i+1}',f'{c.rehandles:.2f}',f'{c.premarshals:.2f}',f'{c.rehandles+c.premarshals:.2f}',f'{rec.keep_score-c.score:+.1f}'])
-    table(['선택','예상 재취급 / 회','선작업 / 회','총 추가 이동 / 회','종합 비용 개선 / 점'],rows)
-    st.caption('60분·공통 도착 시나리오 평균. 총 추가 이동 = 재취급 + 선작업. 최초 적치·본선 인출은 제외합니다. 종합 비용에는 대기·지연도 포함되므로 이동 횟수만 줄어드는 것은 아닙니다.')
+    premarshal_table(rec)
 
 
 def sharing_page(sim):
