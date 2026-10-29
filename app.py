@@ -236,7 +236,7 @@ def dashboard():
             st.info(f'{cid}는 {STATUSES[o.statuses[cid]]} 상태입니다'+(f' (현재 {slot(*pos)})' if pos else '')+'. 위 목록에서 검토할 다른 화물을 고르세요.')
         else:st.info('모든 반입 대상의 적치가 완료되었습니다.')
         with st.container(key='canvas'):
-            panel('야드 현황',subtitle=f'A1 / B1 블록 · {tm(o.now)} · 컨테이너에 커서를 올리면 강조됩니다')
+            panel('야드 현황',subtitle=f'A1 / B1 블록 · {tm(o.now)} · 컨테이너에 마우스를 올리면 번호·인출 순서가 보입니다')
             render_3d(placement_figure(o,cid,None,height=400),400);legend()
         return
     cargo_ready=cargo_panel(sim,cid)
@@ -261,7 +261,7 @@ def dashboard():
     left,right=st.columns([1.75,1],gap='medium')
     with left:
         with st.container(key='canvas'):
-            panel('적치 미리보기',subtitle=f'{cid} → {slot(chosen.stack,chosen.tier)} · 컨테이너에 커서를 올리면 강조됩니다')
+            panel('적치 미리보기',subtitle=f'{cid} → {slot(chosen.stack,chosen.tier)} · 컨테이너에 마우스를 올리면 번호·인출 순서가 보입니다')
             render_3d(placement_figure(o,cid,(chosen.stack,chosen.tier),height=420),420,autoplay_ms=110);legend()
     with right:
         with st.container(key='review'):
