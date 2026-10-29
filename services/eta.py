@@ -9,9 +9,14 @@ def eta_status(c,forecast,now,config):
     uncertain=forecast.p10<lo<forecast.p90 or forecast.p10<hi<forecast.p90
     return state,uncertain
 
+def sample_seed(o):
+    """입력이 같으면 같은 표본: (야드 버전, 계획 버전, 관련 화물의 ETA 발행 버전)으로 시드를 정합니다. 현재 시각은 쓰지 않습니다."""
+    etas=sorted((cid,f.update_id) for cid,f in o.forecasts.items() if o.statuses.get(cid) not in ('RETRIEVED','EXCEPTION_LATE','STORED','IN_MOVE'))
+    return int(stable_hash([o.config.seed,o.yard_version,o.plan_version,etas,'public-eta-samples']),16)
+
 def sample_arrivals(o,policy):
     """Common random numbers across candidates, independent from truth generation."""
-    rng=random.Random(int(stable_hash([o.config.seed,o.now,'public-eta-samples']),16))
+    rng=random.Random(sample_seed(o))
     result=[]
     for _ in range(o.config.samples):
         sampled={}

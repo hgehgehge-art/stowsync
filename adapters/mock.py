@@ -10,6 +10,11 @@ STORY_DELAY = 1500
 STORY_LOAD_START = 4200
 STORY_B_ARRIVAL = 1900
 STORY_PLAN_AT = 600
+STORY_V2 = 'PACIFIC LINK'          # 작업 중인 두 번째 선박(09:25 접안, 09:30 인출 시작)
+STORY_V2_START = 1800
+STORY_BATCH = {2: 2520, 6: 2640}   # 대표 외 반입 순번(initial_count 기준 오프셋) → 게이트 도착 시각
+STORY_V2_INITIAL = 10              # 초기 적치 중 두 번째 선박 화물(번호)
+STORY_V2_ARRIVING = 6              # 반입 화물 중 두 번째 선박 화물(오프셋)
 
 def build_scenario(config: Config, seed=None) -> ScenarioBundle:
     cfg = config.model_copy(update={"seed": config.seed if seed is None else seed})
@@ -35,8 +40,11 @@ def build_scenario(config: Config, seed=None) -> ScenarioBundle:
         if cfg.preset == "cutoff" and i >= n-5: arrival = 11000 + (i-n+5)*90
         if story and i == initial_count: arrival, booking = STORY_ARRIVAL, STORY_ARRIVAL - STORY_DELAY
         if story and i == initial_count + 4: arrival = booking = STORY_B_ARRIVAL
+        if story and (i - initial_count) in STORY_BATCH: arrival = booking = STORY_BATCH[i - initial_count]
         cargo='위험물' if i==initial_count+1 else '환적' if i==initial_count+2 else '일반'
-        containers[cid] = Container(cid, "OCEAN HARMONY", block, max(0, booking-300), max(600, booking+300), round(rng.uniform(12, 25), 1), initial, cargo_type=cargo, hazard_class='3 · 모의' if cargo=='위험물' else '', connecting_vessel='PACIFIC LINK' if cargo=='환적' else '')
+        if story and (i - initial_count) in STORY_BATCH: cargo = '일반'
+        vessel = STORY_V2 if story and (i == STORY_V2_INITIAL or i - initial_count == STORY_V2_ARRIVING) else "OCEAN HARMONY"
+        containers[cid] = Container(cid, vessel, block, max(0, booking-300), max(600, booking+300), round(rng.uniform(12, 25), 1), initial, cargo_type=cargo, hazard_class='3 · 모의' if cargo=='위험물' else '', connecting_vessel='PACIFIC LINK' if cargo=='환적' else '')
         if initial:
             choices = [k for k in yard if k.startswith(block) and not k.endswith('-02-03') and len(yard[k]) < 4 and sum(containers[x].weight_t for x in yard[k]) + containers[cid].weight_t <= cfg.stack_weight_limit]
             if not choices:
@@ -73,6 +81,13 @@ def build_scenario(config: Config, seed=None) -> ScenarioBundle:
         # story: 본선 인출은 대표 컨테이너 도착 뒤(STORY_LOAD_START)에 시작. 대표 컨테이너가 인출 순서 1번(선적 상위)
         start = STORY_LOAD_START if story else 1800
         plan = {cid: PlanEntry(cid, j+1, start+j*110, 1+j//20) for j,cid in enumerate(ordered)}
+        if story:
+            # 선박별 인출 예정시각을 정한 뒤, 전체 인출 순서는 예정시각 순으로 다시 매깁니다.
+            v1 = [x for x in ordered if containers[x].vessel_id != STORY_V2]
+            v2 = [x for x in ids if containers[x].vessel_id == STORY_V2]
+            due = {x: STORY_LOAD_START + j * 110 for j, x in enumerate(v1)}
+            due.update({x: STORY_V2_START + j * 1200 for j, x in enumerate(v2)})
+            plan = {cid: PlanEntry(cid, j+1, due[cid], 1) for j, cid in enumerate(sorted(due, key=lambda x: (due[x], x)))}
     if (cfg.plan_changes and not story) or cfg.preset == "reversal":
         ordered = list(plan)
         # Publish all changes at 35 minutes; never leak them to earlier observations.
@@ -83,6 +98,9 @@ def build_scenario(config: Config, seed=None) -> ScenarioBundle:
         changed = {cid: asdict(PlanEntry(cid,j+1,max(2400,2700+j*90),1+j//20)) for j,cid in enumerate(ordered)}
         events.append(Event(2100,"PLAN_UPDATE","PLAN-P2",{"version":"P2","entries":changed}))
     vessels = {"OCEAN HARMONY": {"gate_open": 0, "gate_cutoff": 10800, "eta": 1800, "terminal": "T01"}}
+    if story:
+        vessels["OCEAN HARMONY"]["eta"] = STORY_LOAD_START - 600
+        vessels[STORY_V2] = {"gate_open": 0, "gate_cutoff": 10800, "eta": STORY_V2_START - 300, "terminal": "T01"}
     return ScenarioBundle(cfg, containers, yard, plan, forecasts, events, vessels)
 
 def validate_bundle(bundle: ScenarioBundle) -> ValidationReport:

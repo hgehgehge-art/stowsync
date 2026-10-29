@@ -28,7 +28,11 @@ def start_story(cfg=STORY_CONFIG):
     focus, other = story_ids(bundle)
     sim = Simulator(bundle, 'A')
     sim.manual = True          # 자동 선작업 없음(선작업은 사람이 승인할 때만)
-    sim.manual_ids = {focus}   # 대표 컨테이너만 플래너 승인 대상, 나머지는 같은 규칙으로 자동 처리
+    # 대표 컨테이너와 비슷한 시각에 같은 블록으로 들어오는 트럭(처리 순서 검토 대상)은 플래너 승인 대상, 나머지는 같은 규칙으로 자동 처리
+    from adapters.mock import STORY_BATCH
+    ic = sum(c.initial for c in bundle.containers.values())
+    ids = list(bundle.containers)
+    sim.manual_ids = {focus} | {ids[ic + k] for k in STORY_BATCH}
     sim.advance(STORY_PLAN_AT)
     # 기존 계획: 예약시각(지연 전)에 맞춰 잡아 둔 적치 위치
     planned = recommend_slots(sim.observe(), focus, 'A').candidates[0].stack

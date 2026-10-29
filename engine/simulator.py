@@ -32,6 +32,8 @@ class Simulator:
         self.cargo_checks=set();self.eta_overrides=set()
         # 수동 승인이 필요한 컨테이너(대표 컨테이너). 나머지는 같은 규칙으로 자동 처리합니다.
         self.manual_ids=set();self.forecast_log={}
+        # 승인한 처리 순서 [(cid, 목표 스택)]. 다음 차례 트럭이 아직 오지 않았으면 기다립니다.
+        self.unload_plan=[]
         self.run_id=f'{policy}-{stable_hash([bundle.config.model_dump(),bundle.truth_events,bundle.initial_yard])}'
         self.termination='RUNNING'
         for e in bundle.truth_events:self.push(e.at,e.kind,deepcopy(e.payload),e.event_id)
@@ -164,6 +166,15 @@ class Simulator:
             waiting=sorted((x for x in self.yard_arrivals if self.bundle.containers[x].block==b and x not in self.manual_ids),key=lambda x:(self.yard_arrivals[x],x))
             old_truck=bool(waiting and self.now-self.yard_arrivals[waiting[0]]>900)
             def unload():
+                for cid,dst in list(self.unload_plan):
+                    if self.bundle.containers[cid].block!=b:continue
+                    if cid not in self.yard_arrivals:break
+                    self.unload_plan.remove((cid,dst));self.manual_ids.discard(cid)
+                    keys=feasible(self.observe(),cid,None)
+                    if dst not in keys:
+                        rec=recommend_slots(self.observe(),cid,self.policy);dst=rec.candidates[0].stack if rec.candidates else None
+                    if dst:return self.start_move(cid,'INITIAL',dst)
+                    break
                 if not waiting or self.manual_initial:return False
                 cid=waiting[0];o=self.observe();rec=recommend_slots(o,cid,self.policy)
                 if not rec.candidates and self.headroom:
