@@ -73,11 +73,12 @@ def test_full_flow_keeps_focus_and_never_double_counts():
     at = AppTest.from_file(APP, default_timeout=120).run()
     assert not at.exception
     story = at.session_state['story']; focus = story['focus']
-    assert at.session_state['page'] == 'story' and at.session_state['focus'] == focus
+    assert at.session_state['page'] == 'story'
+    assert len(at.session_state['story_sim'].bundle.containers) == 20 and len(at.session_state['ops'].bundle.containers) == 40
     walk_to_decision(at, focus)
     approve = button(at, '모의 승인')
     approve.click().run()
-    sim = at.session_state['ops']
+    sim = at.session_state['story_sim']
     moves = len(sim.moves); accepted = dict(sim.accepted)
     assert len(accepted) == 1
     # 같은 추천을 다시 승인해도 한 번만 실행
@@ -85,7 +86,7 @@ def test_full_flow_keeps_focus_and_never_double_counts():
     assert sim.approve(rec, at.session_state['story']['decision']['index']).valid
     assert len(sim.moves) == moves and sim.accepted.keys() == accepted.keys()
     button(at, '작업 완료까지 진행').click().run()
-    sim = at.session_state['ops']
+    sim = at.session_state['story_sim']
     d = at.session_state['story']['decision']
     assert sim.accepted[d['rec_id']]['status'] == 'COMPLETED'
     assert locate(sim.yard, focus)[0] == d['stack']                               # 3D·로그·완료 상태 일치
@@ -98,14 +99,16 @@ def test_full_flow_keeps_focus_and_never_double_counts():
     assert len(sim.moves) == n and steps[0]['move']['container_id'] == focus
     # 화면 이동·뒤로 가기(URL)로 대표 컨테이너·시각·기록이 초기화되지 않음
     now = sim.now
+    feature_focus = at.session_state['focus']
     for page in PAGES:
         at.button(key='nav_' + page).click().run()
         assert not at.exception, page
-        assert at.session_state['focus'] == focus and at.session_state['ops'].now == now
+        assert at.session_state['story']['focus'] == focus and at.session_state['story_sim'].now == now
         assert at.session_state['story']['decision']['rec_id'] == d['rec_id']
+        assert at.session_state['focus'] == feature_focus                       # 기능 시연 쪽 선택도 유지
     at.query_params['page'] = 'eta'
     at.run()
-    assert at.session_state['page'] == 'eta' and at.session_state['ops'].now == now and len(at.session_state['ops'].moves) == n
+    assert at.session_state['page'] == 'eta' and at.session_state['story_sim'].now == now and len(at.session_state['story_sim'].moves) == n
 
 
 def test_hold_is_a_separate_branch_not_completion():
@@ -113,7 +116,7 @@ def test_hold_is_a_separate_branch_not_completion():
     focus = at.session_state['story']['focus']
     walk_to_decision(at, focus)
     button(at, '보류').click().run()
-    sim = at.session_state['ops']; story = at.session_state['story']
+    sim = at.session_state['story_sim']; story = at.session_state['story']
     state = progress_state(story, sim)
     assert state['승인 또는 보류'] == 'hold' and not state['작업 완료']
     assert not sim.accepted and sim.statuses[focus] == 'YARD_QUEUE'
@@ -125,8 +128,26 @@ def test_selection_does_not_jump_when_focus_leaves_pending_list():
     walk_to_decision(at, focus)
     button(at, '모의 승인').click().run()
     button(at, '작업 완료까지 진행').click().run()
-    at.button(key='nav_recommend').click().run()                                  # 미적치 목록에서 빠진 뒤
-    assert not at.exception and at.session_state['focus'] == focus
+    at.button(key='nav_recommend').click().run()
+    assert not at.exception and at.session_state['story']['focus'] == focus
+    # 기능 화면: 승인한 화물이 미적치 목록에서 빠져도 다른 화물로 자동 전환하지 않음
+    ops = at.session_state['ops']; f = at.session_state['focus']
+    next(b for b in at.button if b.label == '선택한 배치 모의 승인').click().run()
+    assert any(v['container_id'] == f for v in at.session_state['ops'].accepted.values())
+    next(b for b in at.button if b.label == '현재 작업 완료까지 진행').click().run()
+    at.button(key='nav_recommend').click().run()
+    assert not at.exception and at.session_state['focus'] == f
+
+
+def test_feature_scenario_reset_does_not_touch_story():
+    at = AppTest.from_file(APP, default_timeout=120).run()
+    focus = at.session_state['story']['focus']
+    walk_to_decision(at, focus)
+    before = at.session_state['story_sim'].now
+    next(s for s in at.selectbox if s.label == '시나리오').set_value('capacity')
+    button(at, '시나리오 적용 · 처음부터 시작').click().run()
+    assert at.session_state['config'].preset == 'capacity'
+    assert at.session_state['story_sim'].now == before and at.session_state['story']['progress'].get('compared')
 
 
 def test_no_preference_learning_or_scoring_left():

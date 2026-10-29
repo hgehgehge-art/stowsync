@@ -37,7 +37,7 @@ PAGES={'story':('대표 사례 흐름','CASE WALKTHROUGH','컨테이너 한 개�
        'sync':('변경·승인','HUMAN + AI','계획 변경부터 실행 확인까지, 하나의 결정 이력으로.'),
        'impact':('정책 실험실','POLICY LAB · 별도 자동 실험','대표 사례와 별개로, 같은 합성 사건에서 세 정책을 자동으로 비교합니다.'),
        'data':('데이터 연계','CONNECTED OPERATIONS','지금은 모의 데이터로, 이후에는 기존 시스템과 연결합니다.')}
-PRESET_LABELS={'story':'대표 사례 · 20개','balanced':'기본 운영','late_priority':'지연 도착 · 선적 상위','early_priority':'조기 도착 · 선적 상위','uncertain':'ETA 불확실성 확대','reversal':'선적계획 변경','capacity':'공간 부족','cutoff':'반입 마감 초과','early_low':'조기 도착 · 선적 하위','late_low':'지연 도착 · 선적 하위','premarshal_demo':'유휴시간 선작업 검토'}
+PRESET_LABELS={'balanced':'기본 운영','late_priority':'지연 도착 · 선적 상위','early_priority':'조기 도착 · 선적 상위','uncertain':'ETA 불확실성 확대','reversal':'선적계획 변경','capacity':'공간 부족','cutoff':'반입 마감 초과','early_low':'조기 도착 · 선적 하위','late_low':'지연 도착 · 선적 하위','premarshal_demo':'유휴시간 선작업 검토'}
 STATUSES={'EN_ROUTE':'운송 중','GATE_QUEUE':'게이트 대기','GATE_SERVICE':'게이트 처리','INTERNAL_TRAVEL':'CY 이동 중','YARD_QUEUE':'하차 대기','BLOCKED_CAPACITY':'공간 부족','STORED':'적치 완료','IN_MOVE':'작업 중','RETRIEVED':'인출 완료','EXCEPTION_LATE':'마감 예외','WAIT_GATE_OPEN':'반입 대기'}
 MOVE_LABELS={'INITIAL':'최초 적치','PREMARSH':'사전 이동','REHANDLE':'재취급','RETRIEVE':'본선 인출'}
 
@@ -47,30 +47,34 @@ def comparison(config_json):
     bundle=build_scenario(cfg)
     return {p:run_simulation(bundle,p) for p in 'ABC'}
 
-def reset_operations(cfg):
-    """명시적인 '시나리오 적용 · 처음부터 시작'에서만 호출합니다."""
-    st.session_state.config=cfg
-    if cfg.preset=='story':
-        sim,story=start_story(cfg)
-        bundle=sim.bundle
-    else:
-        bundle=build_scenario(cfg);story=None
-        sim=Simulator(bundle,'C');sim.manual=True;sim.manual_initial=True;sim.advance(0 if cfg.preset=='premarshal_demo' else 2280)
-    st.session_state.ops=sim
+FEATURE_CONFIG=Config(target_count=40,occupancy=.5)
+
+def reset_story():
+    """대표 사례(20개) 전용 데이터. 기능 시연 데이터와 따로 보관해 서로 지우지 않습니다."""
+    sim,story=start_story(STORY_CONFIG)
+    st.session_state.story_sim=sim
     st.session_state.story=story
     for key in ('story_stage','story_option','story_choice','_goto_stage'):st.session_state.pop(key,None)
+
+def reset_operations(cfg):
+    """기능별 화면(통합 관제~데이터 연계)의 시연 데이터. 명시적인 '시나리오 적용 · 처음부터 시작'에서만 호출합니다."""
+    st.session_state.config=cfg
+    bundle=build_scenario(cfg)
+    sim=Simulator(bundle,'C');sim.manual=True;sim.manual_initial=True;sim.advance(0 if cfg.preset=='premarshal_demo' else 2280)
+    st.session_state.ops=sim
     st.session_state.review_log=[]
     st.session_state.guides={}
     st.session_state.notices=[]
     st.session_state.eta_inputs={}
     st.session_state.held=set()
     ready=sorted(sim.yard_arrivals,key=lambda x:(sim.cranes[bundle.containers[x].block] is not None,bundle.containers[x].cargo_type!='일반',sim.yard_arrivals[x]))
-    st.session_state.focus=story['focus'] if story else (ready[0] if ready else next(cid for cid,c in bundle.containers.items() if not c.initial))
+    st.session_state.focus=ready[0] if ready else next(cid for cid,c in bundle.containers.items() if not c.initial)
     st.session_state.pop('active_recommendation',None)
 
-if 'config' not in st.session_state or st.session_state.get('workflow_version')!=3:
-    reset_operations(STORY_CONFIG)
-    st.session_state.workflow_version=3
+if 'config' not in st.session_state or st.session_state.get('workflow_version')!=4:
+    reset_operations(FEATURE_CONFIG)
+    reset_story()
+    st.session_state.workflow_version=4
 # 화면 이동은 조회만 바꿉니다. URL(뒤로 가기 포함)의 page를 따라가되 시뮬레이션 상태는 건드리지 않습니다.
 _qp=st.query_params.get('page')
 if _qp in PAGES:st.session_state.page=_qp
@@ -92,15 +96,18 @@ with st.sidebar:
     for key in PAGES:
         if key=='impact':html('<div class="side-label">INSIGHTS</div>')
         st.button(PAGES[key][0],icon=icons[key],key='nav_'+key,type='primary' if st.session_state.page==key else 'secondary',width='stretch',on_click=navigate,args=(key,))
-    html('<div class="side-label">DEMO SCENARIO</div>')
+    html('<div class="side-label">기능 시연 시나리오 · 40개</div>')
     with st.form('scenario_form',border=False):
         preset=st.selectbox('시나리오',list(PRESET_LABELS),format_func=lambda x:PRESET_LABELS[x],index=list(PRESET_LABELS).index(cfg.preset),label_visibility='collapsed')
-        if st.form_submit_button('시나리오 적용 · 처음부터 시작',width='stretch',help='진행 상태와 판단 기록을 지우고 선택한 시나리오를 처음부터 시작합니다.'):
-            reset_operations(STORY_CONFIG if preset=='story' else Config(target_count=40,occupancy=.5,preset=preset));st.rerun()
+        if st.form_submit_button('시나리오 적용 · 처음부터 시작',width='stretch',help='기능별 화면의 진행 상태와 판단 기록을 지우고 선택한 시나리오를 처음부터 시작합니다. 대표 사례 흐름(20개)은 바뀌지 않습니다.'):
+            reset_operations(Config(target_count=40,occupancy=.5,preset=preset));st.rerun()
     st.toggle('캡처 모드',key='capture_mode',help='조작 안내를 줄여 기획서에 넣기 편하게 표시합니다. 합성 데이터 표시는 유지됩니다.')
-    html('<div class="side-card"><span class="side-stamp">CONCEPT DEMO · 2026</span><p><strong>올컨e 연계 서비스 제안</strong><br>수출 FCL · 2개 블록 · 20ft · 대표 사례 20개<br>야드 플래너 의사결정 지원</p><p>기존 시스템과의 연계는 준비 단계입니다.<br>현재 화면은 합성 데이터로 동작합니다.</p></div>')
+    html('<div class="side-card"><span class="side-stamp">CONCEPT DEMO · 2026</span><p><strong>올컨e 연계 서비스 제안</strong><br>수출 FCL · 2개 블록 · 20ft<br>대표 사례 20개 · 기능 시연 40개<br>야드 플래너 의사결정 지원</p><p>기존 시스템과의 연계는 준비 단계입니다.<br>현재 화면은 합성 데이터로 동작합니다.</p></div>')
 
-sim=st.session_state.ops;o=sim.observe();cfg=st.session_state.config;page=st.session_state.page
+page=st.session_state.page
+# 대표 사례 흐름은 20개 사례 데이터, 나머지 기능 화면은 기능 시연 데이터(40개)를 씁니다.
+sim=st.session_state.story_sim if page=='story' else st.session_state.ops
+o=sim.observe();cfg=st.session_state.config
 with st.spinner('동일 조건의 비교 결과를 계산하고 있습니다…'):
     results=comparison(cfg.model_dump_json())
 
@@ -290,8 +297,6 @@ def sync_page():
     with cs[1]:metric('작업 중',executing,'건','승인된 비선점 작업','amber')
     with cs[2]:metric('작업 완료',completed,'건','이동 완료 사건 기준','blue')
     with cs[3]:metric('보류',len(st.session_state.held),'건','현장 사유 기록','coral')
-    story=st.session_state.story
-    if story:checklist(sim,story)
     approved=[e['at'] for e in sim.events if e['kind']=='APPROVED']
     if approved:
         with st.container(key='canvas'):
@@ -412,7 +417,7 @@ def data_page():
         st.markdown('- [올컨e 공식 매뉴얼](https://www.chainportal.co.kr/manual/download?filename=ChainPortal_APP_Manual.pdf)\n- [BPA Port-i 서비스 소개](https://busanpa.com/board/view.do?boardId=BBS_0000031&dataSid=34863&menuCd=DOM_000000105002001000)\n- [도착 불확실성을 고려한 배치 연구](https://research.utwente.nl/en/publications/approximate-dynamic-programming-for-container-stacking/)')
     html('<div class="export-banner"><strong>기획서 캡처 추천</strong> · 통합 관제: 서비스 전체상 / CY 배치 추천: 핵심 의사결정 / 변경·승인: Human-AI 협업 / 효과 분석: 성과 검증 구조<br>좌측의 캡처 모드를 켜면 조작 도움말이 간소화됩니다. 합성 데이터 표시는 유지됩니다.</div>')
 
-{'story':lambda:story_page(sim,st.session_state.story,goto) if st.session_state.story else st.info('대표 사례 흐름은 「대표 사례 · 20개」 시나리오에서 볼 수 있습니다. 왼쪽에서 시나리오를 적용해 주세요.'),'dashboard':dashboard,'eta':eta_page,'recommend':recommend_page,'sync':sync_page,'impact':impact_page,'data':data_page,
+{'story':lambda:story_page(sim,st.session_state.story,goto,reset_story),'dashboard':dashboard,'eta':eta_page,'recommend':recommend_page,'sync':sync_page,'impact':impact_page,'data':data_page,
  'exceptions':lambda:exceptions_page(sim,choose_container,chart,goto),
  'premarshal':lambda:premarshal_page(sim,chart,reset_operations,goto),
  'sharing':lambda:sharing_page(sim)}[page]()

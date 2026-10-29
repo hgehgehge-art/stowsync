@@ -98,14 +98,13 @@ def advance_until(sim, cond, limit=None):
         sim.advance(one_event=True)
 
 
-def story_page(sim, story, goto):
+def story_page(sim, story, goto, reset):
     cid = story['focus']
     o = sim.observe()
-    if st.session_state.get('focus') != cid:
-        html(f'<div class="section-note">지금 다른 화면에서 고른 컨테이너는 <b>{escape(st.session_state.get("focus") or "")}</b>입니다. '
-             f'이 흐름은 대표 컨테이너 <b>{cid}</b>를 따라갑니다.</div>')
-        if st.button('대표 컨테이너로 돌아가기'):
-            st.session_state.focus = cid; st.rerun()
+    a, b = st.columns([5, 1], vertical_alignment='center')
+    a.caption('대표 사례 흐름은 컨테이너 20개 사례 전용 데이터입니다. 왼쪽의 기능 시연 시나리오(40개)와 따로 진행되며 서로 지우지 않습니다.')
+    if b.button('↺ 처음부터 다시', width='stretch', help='대표 사례의 진행 상태와 판단 기록만 지우고 처음(09:26)부터 다시 시작합니다.'):
+        reset(); st.rerun()
     summary_bar(sim, story, cid)
     checklist(sim, story)
     if '_goto_stage' in st.session_state:
@@ -364,23 +363,21 @@ def stage_decide(sim, story, rec_info, goto):
             story['decision'] = {'type': 'approve', 'at': sim.now, 'rec': rec, 'rec_id': rec.recommendation_id, 'index': choice,
                                  'keep_index': keep_i, 'best_index': best_i, 'pre': pre, 'stack': c.stack, 'tier': c.tier,
                                  'slot': slot(c.stack, c.tier), 'label': labels[choice], 'reason': '' if reason == REASONS[0] else reason}
-            log_decision(sim, cid, '승인', labels[choice], story['decision']['reason'], rec.recommendation_id)
-            st.session_state.guides[cid] = {'id': rec.recommendation_id, 'container': cid, 'slot': slot(c.stack, c.tier),
-                                            'block': o.containers[cid].block, 'at': tm(sim.now), 'plan': rec.plan_version,
-                                            'ack': False, 'reason': story['decision']['reason']}
+            log_decision(story, sim, cid, '승인', labels[choice], story['decision']['reason'], rec.recommendation_id)
+            story['guide'] = {'lane': f'{o.containers[cid].block} 블록', 'at': tm(sim.now)}
             go_stage(4)
         else:
             st.error(' · '.join(rep.errors))
     if b.button('보류', width='stretch', key='story_hold'):
         story['decision'] = {'type': 'hold', 'at': sim.now, 'label': '판단 보류 · 실행하지 않음',
                              'reason': '' if reason == REASONS[0] else reason}
-        log_decision(sim, cid, '보류', '—', story['decision']['reason'], rec.recommendation_id)
+        log_decision(story, sim, cid, '보류', '—', story['decision']['reason'], rec.recommendation_id)
         st.rerun()
     st.caption('승인 버튼을 여러 번 눌러도 같은 추천은 한 번만 실행됩니다. 실제 TOS 지시나 기사 알림은 보내지 않습니다.')
 
 
-def log_decision(sim, cid, word, where, reason, rid):
-    st.session_state.review_log.append({'시각': tm(sim.now), '컨테이너': cid, '결정': word, '위치': where,
+def log_decision(story, sim, cid, word, where, reason, rid):
+    story.setdefault('log', []).append({'시각': tm(sim.now), '컨테이너': cid, '결정': word, '위치': where,
                                         '사유': reason or '—', '추천ID': rid})
 
 
@@ -395,6 +392,7 @@ def stage_execute(sim, story, rec_info, goto):
     word = {'EXECUTING': '이동 중', 'COMPLETED': '완료', 'QUEUED': '대기', 'APPROVED': '승인'}.get(acc, acc)
     table(['항목', '내용'], [['승인한 작업', f'{cid} 트럭 → {d["slot"]} (최초 적치)'], ['작업 상태', word],
                            ['현재 위치', slot(*locate(sim.yard, cid)) if locate(sim.yard, cid) else STATUS[sim.statuses[cid]]],
+                           ['기사 안내(미리보기)', f'{story["guide"]["at"]} · {story["guide"]["lane"]} 하차 지점 안내 생성' if story.get('guide') else '—'],
                            ['시뮬레이션 시각', tm(sim.now)]])
     if st.button('작업 완료까지 진행', type='primary', width='stretch', disabled=acc == 'COMPLETED'):
         advance_until(sim, lambda: sim.accepted.get(d['rec_id'], {}).get('status') == 'COMPLETED'); st.rerun()
@@ -476,7 +474,7 @@ def history(sim, story):
         panel('누적 작업 이력', 'CASE LOG', '대표 컨테이너와 관련된 판단·이동만 모았습니다. 판단은 중립 기록으로만 남깁니다.')
         cid = story['focus']
         rows = [[r['시각'], r['결정'], escape(r['컨테이너']), escape(r['위치']), escape(r['사유'])]
-                for r in st.session_state.review_log if r['컨테이너'] == cid]
+                for r in story.get('log', []) if r['컨테이너'] == cid]
         for m in sim.moves:
             if m['completed'] and (m['container_id'] == cid or m.get('for_container') == cid):
                 from services.story import move_reason, MOVE_WORDS
