@@ -100,7 +100,7 @@ def order_cards(sim, res, focus, pick_key='seq_pick'):
         sp = [c for c in opt['order'] if special(sim, c)]
         html(f'<div class="opt {"best" if i == 0 else ""} {"sel" if i == pick else ""}"><div class="opt-head"><b>{i + 1}안 · {order_text(opt["order"], labels)}</b>'
              f'{badge("1순위", "") if i == 0 else ""}{badge("도착순과 같음", "") if same else ""}</div>'
-             f'<div class="opt-nums"><span>트럭 대기 E {fmt_delta(d["E"])}</span><span>지연 T {fmt_delta(d["T"])}</span>'
+             f'<div class="opt-nums"><span>추가 이동 작업시간 E {fmt_delta(d["E"])}</span><span>트럭 대기 T {fmt_delta(d["T"])}</span>'
              f'<span>인출 지연 D {fmt_delta(d["D"])}</span></div>'
              f'<div class="opt-nums"><span>예상 재취급(야드 전체·60분) <b>{rh_o:.1f}회</b> · 기준 {rh_b:.1f}회</span></div>'
              f'<ul class="opt-why">{lines}</ul>'
@@ -112,7 +112,7 @@ def order_cards(sim, res, focus, pick_key='seq_pick'):
         rows = [[f'{i + 1}안', order_text(o['order'], labels), f'{o["J"]:.0f}'] for i, o in enumerate(opts)]
         rows.append(['기준', order_text(base['order'], labels), f'{base["J"]:.0f}'])
         table(['안', '순서', '평균 J'], rows)
-        st.caption(f'J = E + {seq.WEIGHTS["T"]}T + {seq.WEIGHTS["D"]}D + {seq.WEIGHTS["B"]:.0f}B(초 단위, 가중치는 가정값). '
+        st.caption(f'J = E + {seq.WEIGHTS["T"]}T + {seq.WEIGHTS["D"]}D + {seq.WEIGHTS["B"]:.0f}B. E 추가 이동(재취급·선작업) 작업시간, T 트럭 대기, D 인출 지연(모두 초), B 먼저 실을 화물을 가로막는 쌍의 수. 가중치는 가정값. '
                    f'평가한 순서 {len(res["all"])}개 · 계산 {res["ms"]}ms' + (' · 대기 5대 초과분은 도착순으로 뒤에 붙임' if res.get('limited') else ''))
     first = opts[pick]['order'][0]
     o = sim.observe()
@@ -352,7 +352,7 @@ def sensitivity_panel(sim, story, res):
     block = sim.bundle.containers[focus].block
     labels = label_map(res)
     with st.expander('가정이 바뀌면 1순위도 바뀔까? (민감도)'):
-        st.caption('대기(E) 1에 대한 지연 T 가중치 0.25·0.5·1, 인출 지연 D 가중치 1·2·4, 가로막힘 B 가중치 30·60·120, '
+        st.caption('추가 이동 작업시간 E의 가중치를 1로 두고 트럭 대기 T 가중치 0.25·0.5·1, 인출 지연 D 가중치 1·2·4, 가로막힘 B 가중치 30·60·120, '
                    '도착 표본 8·16·32개를 모두 조합(81가지)해 상위 10개 순서 중 1위가 무엇인지 다시 셉니다.')
         key = seq.cache_key(sim, block)
         if st.button('민감도 계산', key='seq_sens', width='stretch'):
