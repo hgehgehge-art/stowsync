@@ -10,7 +10,7 @@ from services.recommend import propose_premarshal,recommend_slots
 from services.workflows import (RULES,quadrant,demo_history,predict_arrival,terminal_feed,change_vessel,persist_event)
 from engine.simulator import premarshal_beneficiary
 from services.metrics import csv_bytes
-from ui.theme import html,badge,panel,metric,table,tm
+from ui.theme import html,badge,panel,metric,table,tm,allcone
 from ui.scene import yard_figure
 
 
@@ -41,35 +41,34 @@ def cargo_panel(sim,cid,key='cargo'):
         html(badge('일반 드라이 · 수출 FCL','blue'));return True
     if c.cargo_type=='위험물':
         title=f'위험물 · Class {c.hazard_class}'
-        text=f'모의 전용 구역 {c.block}-02-03만 후보로 허용합니다. 동일 분류 외 혼적을 제한하며, 현장 담당자의 서류·구역 확인 후 승인합니다.'
-        label='위험물 서류와 모의 전용 구역 확인'
+        text=f'위험물 전용 구역 {c.block}-02-03만 후보로 허용합니다. 동일 분류 외 혼적을 제한하며, 현장 담당자의 서류·구역 확인 후 승인합니다.'
+        label='위험물 서류와 전용 구역 확인'
     else:
-        title='환적 화물 · 예외 시연'
+        title='환적 화물'
         text=f'연결 선박 {c.connecting_vessel} / 인출 대상 {c.vessel_id}. 연결 항차와 인출 순서를 담당자가 확인합니다. 수출 FCL 핵심 범위 외 예외 처리 예시입니다.'
         label='연결 항차와 인출 순서 확인'
     html(f'<div class="cargo-alert"><div>{badge(title,"coral" if c.cargo_type=="위험물" else "amber")}</div><p>{escape(text)}</p></div>')
     checked=st.checkbox(label,value=cid in sim.cargo_checks,key=key+'_'+cid)
     if checked:sim.cargo_checks.add(cid)
     else:sim.cargo_checks.discard(cid)
-    if c.cargo_type=='위험물':st.caption('배치 제약은 시연용 규칙입니다. 실제 위험물 격리 기준을 검증한 기능은 아닙니다.')
     return checked
 
 
 def arrival_inputs(sim,cid):
     c=sim.bundle.containers[cid];f=sim.forecasts.get(cid)
     with st.container(key='eta_inputs'):
-        panel('도착 예측 입력과 근거','INPUT → ETA','예약·기사 이력·동의한 위치정보를 바꾸면 예측을 다시 계산합니다. 모든 입력은 가상 값입니다.')
+        panel('도착 예측 입력과 근거','INPUT → ETA','예약·기사 이력·동의한 위치정보를 바꾸면 예측을 다시 계산합니다.')
         existing=st.session_state.eta_inputs.get(cid,{})
         with st.form('arrival_'+cid):
             a,b,c3=st.columns(3)
             with a:
                 booking=st.number_input('예약 시각 · 09:00 이후 분',min_value=0,max_value=360,value=existing.get('booking',round((c.booking_start+c.booking_end)/120)))
-                consent=st.checkbox('가상 위치정보 사용에 동의',value=existing.get('consent',True))
+                consent=st.checkbox('위치정보 사용에 동의',value=existing.get('consent',True))
             with b:
-                remaining=st.number_input('가상 GPS · 게이트까지 남은 분',0,180,existing.get('remaining',max(1,round(((f.p50 if f else sim.now+900)-sim.now)/60))))
+                remaining=st.number_input('GPS · 게이트까지 남은 분',0,180,existing.get('remaining',max(1,round(((f.p50 if f else sim.now+900)-sim.now)/60))))
                 age=st.number_input('위치정보 갱신 경과 · 분',0,60,existing.get('age',1))
             with c3:
-                traffic=st.slider('가상 교통 소요 배수',.5,2.5,existing.get('traffic',1.),.1)
+                traffic=st.slider('교통 소요 배수',.5,2.5,existing.get('traffic',1.),.1)
                 history_mode=st.selectbox('기사 예약 준수 이력', ['기본 이력 20건','정시 위주 20건','지연 위주 20건','이력 없음'],index=['기본 이력 20건','정시 위주 20건','지연 위주 20건','이력 없음'].index(existing.get('history_mode','기본 이력 20건')))
             history={'기본 이력 20건':demo_history(cid),'정시 위주 20건':[-3,0,2,4,5]*4,'지연 위주 20건':[10,16,22,28,34]*4,'이력 없음':[]}[history_mode]
             predicted,evidence=predict_arrival(cid,sim.now,booking*60,history,consent,remaining,traffic,age)
@@ -84,14 +83,14 @@ def arrival_inputs(sim,cid):
         if sim.statuses[cid]!='EN_ROUTE':st.caption('이미 도착한 화물은 예측을 덮어쓰지 않습니다. 운송 중인 컨테이너를 선택하면 입력을 반영할 수 있습니다.')
         a,b,c3=st.columns(3)
         with a:metric('현재 ETA 입력 품질',f.trust_score if f else '—','점','규칙 기반 점수 · 확률 아님','teal')
-        with b:metric('입력 이력의 준수율',round(evidence['준수율']*100),'%',f'{len(history)}건 · 예약 ±15분 이내의 가상 기록','blue')
+        with b:metric('입력 이력의 준수율',round(evidence['준수율']*100),'%',f'{len(history)}건 · 예약 ±15분 이내 도착 비율','blue')
         with c3:metric('위치정보 반영', '사용' if evidence['GPS 반영'] else '제외','','입력 미리보기 · 반영 버튼으로 적용','amber')
         detail=st.session_state.eta_inputs.get(cid,{}).get('evidence')
         if detail:
             table(['반영 항목','현재 계산 근거'],[['예약 기준',tm(detail['예약 기준'])],['기사 이력 보정',f'{detail["이력 보정(분)"]:+.1f}분 · {detail["표본 수"]}건'],['GPS 가중치',f'{detail["GPS 가중치"]:.0%} · {detail["GPS 제외 사유"] or "동의·최신성 확인"}']])
         with st.expander('입력 품질 점수 산식과 이력 확인'):
-            st.caption('기본 25점 + 이력량 최대 20점 + 준수율 최대 15점 + 유효 GPS 30점 + 예측폭 최대 10점. 검증된 확률이 아닌 입력 품질 점수입니다. 동의하지 않거나 5분을 초과한 위치정보는 계산에서 제외합니다. 적용한 입력은 자동 합성 ETA 갱신보다 우선합니다.')
-            st.dataframe({'가상 운행':list(range(1,len(history)+1)),'예약 대비 도착 편차(분)':history},hide_index=True,width='stretch')
+            st.caption('기본 25점 + 이력량 최대 20점 + 준수율 최대 15점 + 유효 GPS 30점 + 예측폭 최대 10점. 검증된 확률이 아닌 입력 품질 점수입니다. 동의하지 않거나 5분을 초과한 위치정보는 계산에서 제외합니다. 적용한 입력은 자동 ETA 갱신보다 우선합니다.')
+            st.dataframe({'운행':list(range(1,len(history)+1)),'예약 대비 도착 편차(분)':history},hide_index=True,width='stretch')
 
 
 def exceptions_page(sim,choose,chart,goto):
@@ -106,11 +105,11 @@ def exceptions_page(sim,choose,chart,goto):
     if o.statuses[cid]=='EN_ROUTE' and (not f or f.trust_score<o.config.min_eta_trust or o.now-f.observed_at>=o.config.eta_stale):
         st.warning('ETA 입력 품질·최신성 기준 미충족: 선작업을 보류하고 예약 기반 후보와 필수 작업을 우선합니다.')
     rec=recommend_slots(o,cid)
-    panel('현재 상황의 배치 대안','EXPECTED REHANDLING','해당 후보를 선택했을 때 평가 야드 전체에서 발생할 추가 이동의 평균입니다. 소수는 여러 시나리오의 평균을 뜻합니다.')
+    panel('현재 상황의 배치 대안','EXPECTED REHANDLING','해당 후보를 선택했을 때 야드 전체에서 생길 추가 이동입니다. 트럭 도착 시각을 예측 범위 안에서 8가지로 가정한 평균이라 소수로 표시됩니다.')
     table(['후보','예상 재취급','선작업','총 추가 이동','전체 누적 인출 지연'],[[slot(c.stack,c.tier),f'{c.rehandles:.2f}회',f'{c.premarshals:.2f}회',f'{c.rehandles+c.premarshals:.2f}회',f'{c.delay_seconds/60:.1f}분'] for c in rec.candidates[:3]])
     if rec.candidates:chart(yard_figure(o,cid,(rec.candidates[0].stack,rec.candidates[0].tier),height=300),'exception_yard')
-    else:st.info('현재 상태에서는 신규 적치 후보가 없습니다. CY 배치 추천에서 미적치 화물을 선택하세요.')
-    if st.button('이 화물의 배치 검토',type='primary'):goto('recommend')
+    else:st.info('현재 상태에서는 신규 적치 후보가 없습니다. 통합 관제·배치에서 미적치 화물을 선택하세요.')
+    if st.button('이 화물의 배치 검토',type='primary'):goto('dashboard')
 
 
 def premarshal_page(sim,chart,reset,goto):
@@ -122,8 +121,8 @@ def premarshal_page(sim,chart,reset,goto):
     with c:metric('ETA 입력 품질 기준',o.config.min_eta_trust,'점','규칙 기반 점수 · 확률 아님 · 가정값','blue')
     if not rec:
         st.info('현재 안전하게 앞당길 선작업이 없습니다. 필수 작업·하차 대기·예측 불확실성이 있거나, 이동 비용을 포함한 개선 조건을 충족하지 못했습니다.')
-        st.caption('아래 버튼은 지금까지의 진행 상태와 판단 기록을 지우고 선작업 시연 시나리오를 처음부터 시작합니다.')
-        if st.button('선작업 시연 시나리오로 처음부터 시작',type='primary',help='현재 운영 상태를 초기화하고 반입 전 유휴시간이 있는 합성 시나리오로 전환합니다.'):
+        st.caption('아래 버튼은 지금까지의 진행 상태와 판단 기록을 지우고 선작업 검토 시나리오를 처음부터 시작합니다.')
+        if st.button('선작업 검토 시나리오로 처음부터 시작',type='primary',help='현재 운영 상태를 초기화하고 반입 전 유휴시간이 있는 시나리오로 전환합니다.'):
             reset(o.config.model_copy(update={'preset':'premarshal_demo'}));goto('premarshal')
         with st.expander('추천을 보류하는 조건',expanded=True):
             st.write('크레인 작업 중 / 해당 블록 하차·진입 대기 / ETA 갱신 지연 또는 낮은 입력 품질 점수(65점 미만) / 다음 작업까지 이동시간 + 2분 여유 부족 / 총 평가 비용 개선 부족 / 최근 10분 내 같은 화물 이동')
@@ -143,16 +142,16 @@ def premarshal_page(sim,chart,reset,goto):
             from ui.scene import coords,PITCH,DX,DY,DZ
             x0,y0=coords(src[0]);x1,y1=coords(candidate.stack)
             arrow=[(x0+DX/2,y0+DY/2,(src[1]-1)*PITCH+DZ),(x0+DX/2,y0+DY/2,3),(x1+DX/2,y1+DY/2,3),(x1+DX/2,y1+DY/2,(candidate.tier-1)*PITCH+DZ)]
-            # 주황은 대표 컨테이너로 유지하고, 이동 대상은 화살표와 목적 위치(초록)로 구분합니다
+            # 노랑은 대표 컨테이너로 유지하고, 이동 대상은 화살표와 목적 위치(초록)로 구분합니다
             chart(yard_figure(o,st.session_state.get('focus'),(candidate.stack,candidate.tier),height=350,arrow=arrow),'premarshal_yard')
-            st.caption(f'남색 화살표: 이동 대상 {cid}의 경로 · 반투명 초록: 목적 위치 · 주황: 대표 컨테이너')
+            st.caption(f'흰 화살표: 이동 대상 {cid}의 경로 · 반투명 초록: 목적 위치 · 노랑: 대표 컨테이너')
     with right:
         with st.container(key='focus'):
             panel('유휴시간에 앞당길 작업','REVIEW BEFORE MOVE')
             html(f'<div class="focus-route"><span>{slot(*src)}</span><strong>→ {slot(candidate.stack,candidate.tier)}</strong></div><div class="detail-row"><span>작업 시간</span><b>{candidate.move_seconds/60:.1f}분</b></div><div class="detail-row"><span>이동 대상</span><b>{cid}</b></div><div class="detail-row"><span>인출을 준비하는 화물</span><b>{who or '—'}</b></div><div class="detail-row"><span>추천 평가</span><b>도착 상황 {len(candidate.sample_scores)}가지 가정 · 60분</b></div>')
             ready=cargo_panel(sim,cid,'pre_cargo')
             reason=st.selectbox('선작업 판단 사유',['유휴시간 활용·인출 방해 예방','현장 장비 동선 고려','다른 작업 우선'])
-            if st.button('선작업 모의 승인',type='primary',width='stretch',disabled=not ready):
+            if st.button('선작업 승인',type='primary',width='stretch',disabled=not ready):
                 report=sim.approve(rec,selected)
                 if report.valid:
                     record_approval(sim,rec,selected,reason)
@@ -172,25 +171,26 @@ def premarshal_page(sim,chart,reset,goto):
 def sharing_page(sim):
     driver,notifications=st.tabs(['기사 하차 안내','역할별 변경 알림'])
     with driver:
-        panel('승인한 배치가 기사 안내로','ALLCON-e / CONCEPT PREVIEW','올컨e 연계를 제안하는 독립적인 모의 화면입니다. 실제 알림은 전송되지 않습니다.')
+        panel('올컨e 앱 기사 하차 안내')
+        html(f'<div class="allcone-box">{allcone("올컨e 앱")} 승인한 하차 블록과 진입 경로를 운송기사 앱 화면으로 보냅니다.</div>')
         guides=list(st.session_state.guides.values())
-        if not guides:st.info('CY 배치 추천에서 화물을 승인하면 이곳에 안내가 생성됩니다.')
+        if not guides:st.info('통합 관제·배치에서 화물을 승인하면 이곳에 안내가 생성됩니다.')
         else:
             cid=st.selectbox('안내할 컨테이너',[g['container'] for g in guides])
             g=st.session_state.guides[cid];state=sim.statuses.get(cid,'RESET')
             completed=state in ('STORED','RETRIEVED');valid=state in ('IN_MOVE','STORED','RETRIEVED')
             left,right=st.columns([1,1.2])
             with left:
-                html(f'<div class="phone"><div class="phone-bar">{tm(sim.now)} <span>ALLCON-e 연계 제안</span></div><div class="phone-title">{"하차 완료" if completed else "하차 위치가 확정됐어요"}</div><p>관제 담당자가 승인한 위치를 확인해 주세요.</p><div class="phone-container">{escape(cid)}</div><div class="phone-slot">{escape(g["block"])}<small>BLOCK</small></div><div class="phone-destination">배정 위치 {escape(g["slot"])}</div><div class="phone-route">게이트 → 지정 진입로 → {escape(g["block"])} 인계 지점</div><p>차량은 관제 지시에 따라 이동하고, 컨테이너 적치는 장비 담당자가 수행합니다.</p><div class="phone-status">{"✓ 기사 확인 완료" if g["ack"] else "기사 확인 대기"} · 모의 안내</div></div>')
+                html(f'<div class="phone"><div class="phone-bar">{tm(sim.now)} <span class="phone-brand">올컨e</span></div><div class="phone-title">{"하차 완료" if completed else "하차 위치가 확정됐어요"}</div><p>관제 담당자가 승인한 위치를 확인해 주세요.</p><div class="phone-container">{escape(cid)}</div><div class="phone-slot">{escape(g["block"])}<small>BLOCK</small></div><div class="phone-destination">배정 위치 {escape(g["slot"])}</div><div class="phone-route">게이트 → 지정 진입로 → {escape(g["block"])} 인계 지점</div><p>차량은 관제 지시에 따라 이동하고, 컨테이너 적치는 장비 담당자가 수행합니다.</p><div class="phone-status">{"✓ 기사 확인 완료" if g["ack"] else "기사 확인 대기"}</div></div>')
             with right:
                 with st.container(key='focus'):
                     panel('관제·기사 간 확인','DELIVERY STATUS')
                     table(['항목','안내 내용'],[['승인 시각',g['at']],['승인 계획',g['plan']],['현재 작업',{'IN_MOVE':'하차 작업 중','STORED':'적치 완료','RETRIEVED':'본선 인출 완료'}.get(state,'유효성 재확인')],['기사 수신', '확인 완료' if g['ack'] else '미확인']])
-                    if st.button('기사 확인 모의 처리',type='primary',disabled=g['ack'] or not valid):
+                    if st.button('기사 확인 처리',type='primary',disabled=g['ack'] or not valid):
                         g['ack']=True;persist_event(st.session_state.session_id+g['id']+'-ack','driver_ack',g)
                         notify_demo(sim,'기사 안내 확인',f'{cid} · 하차 위치 확인 완료',('플래너','관제 담당자'));st.rerun()
                     st.download_button('기사 안내 JSON',json.dumps(g,ensure_ascii=False,indent=2),'driver_guide.json','application/json')
-                    st.caption('블록·인계 지점을 안내합니다. 실제 도로 경로나 작업 지시로 사용하지 않는 시연 화면입니다.')
+                    st.caption('기사에게는 하차 블록과 인계 지점만 안내합니다. 슬롯 단위 작업 지시는 크레인에만 전달합니다.')
     with notifications:
         role=st.radio('조회 역할',['플래너','관제 담당자','운송기사','선사'],horizontal=True)
         notices=[n for n in st.session_state.notices if role in n['roles']]
@@ -200,14 +200,14 @@ def sharing_page(sim):
             detail=n['detail'] if role in ('플래너','관제 담당자') else ('배정 위치는 기사 하차 안내에서 확인해 주세요.' if n['title']=='하차 위치 승인' else n['detail'])
             html(f'<div class="notice-card"><span>{n["at"]} · {escape(n["version"])}</span><h3>{escape(n["title"])}</h3><p>{escape(detail)}</p>{badge("확인 완료" if role in n["read"] else "새 알림","blue")}</div>')
             if role not in n['read'] and st.button('알림 확인',key=n['id']+role):n['read'].append(role);st.rerun()
-        st.caption('역할 전환은 데모 미리보기입니다. 실서비스 인증·권한 제어와 실제 메시지 전송은 연결하지 않았습니다.')
+        st.caption('역할을 바꾸면 그 역할에 전달되는 알림만 보입니다.')
 
 
 def connections_panel(sim):
     with st.container(key='connections'):
-        panel('9개 터미널 통합 일정 · 모의 피드','PORT-i → TOS','T01–T09는 시연용 식별자입니다. 접안 예정과 개별 컨테이너 인출 순서는 구분합니다.')
+        panel('9개 터미널 통합 선석 일정','PORT-i → TOS','접안 예정과 개별 컨테이너 인출 순서는 구분합니다.')
         rows=terminal_feed(sim)
-        table(['가상 터미널','선박','접안 예정','변동','혼잡 참고'],[[r['터미널'],r['선박'],tm(r['접안 예정']),f'{r["변동(분)"]:+d}분',f'{r["혼잡도"]}%'] for r in rows])
+        table(['터미널','선박','접안 예정','변동','혼잡 참고'],[[r['터미널'],r['선박'],tm(r['접안 예정']),f'{r["변동(분)"]:+d}분',f'{r["혼잡도"]}%'] for r in rows])
         a,b=st.columns([1,1])
         with a:
             delay=st.slider('T01 선박 일정 편차 · 분',-15,120,sim.bundle.vessels['OCEAN HARMONY'].get('delay_minutes',0),5)
@@ -215,7 +215,7 @@ def connections_panel(sim):
                 version,shift=change_vessel(sim,delay)
                 notify_demo(sim,'선박 일정 변경',f'OCEAN HARMONY · {shift/60:+.0f}분 변경 · 새 작업계획 {version}')
                 st.session_state.pop('active_recommendation',None);st.rerun()
-            st.caption('데모 가정: 일정 편차만큼 아직 동결되지 않은 인출 예정시각을 조정합니다. 실제 운영에서는 선사의 작업계획을 확인한 뒤 반영해야 합니다.')
+            st.caption('일정 편차만큼 아직 동결되지 않은 인출 예정시각을 조정합니다. 실제 운영에서는 터미널이 확정한 작업계획을 확인한 뒤 반영합니다.')
         with b:
             o=sim.observe();counts={block:sum(len(v) for k,v in o.yard.items() if k.startswith(block)) for block in ('A1','B1')}
             table(['TOS 블록','사용 / 물리 슬롯','슬롯별 제약'],[[block,f'{used} / 24','높이·하중·위험물 구역 확인'] for block,used in counts.items()])

@@ -42,11 +42,10 @@ def test_pages_and_approval_flow():
     next(s for s in at.selectbox if s.label=='시나리오').set_value('balanced')
     next(b for b in at.button if b.label=='시나리오 적용 · 처음부터 시작').click().run()
     assert at.session_state['config'].preset=='balanced'
-    for page in ['eta','recommend','sync','impact','data','dashboard']:
+    for page in ['eta','sync','impact','data','dashboard']:
         at.button(key='nav_'+page).click().run()
         assert not at.exception, [(x.message) for x in at.exception]
-    at.button(key='focus_action').click().run()
-    approve=next(b for b in at.button if b.label=='선택한 배치 모의 승인')
+    approve=next(b for b in at.button if b.label=='선택한 배치 승인')
     assert not approve.disabled
     approve.click().run()
     assert not at.exception

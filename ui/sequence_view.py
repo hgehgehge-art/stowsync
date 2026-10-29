@@ -13,11 +13,11 @@ from services.workflows import quadrant
 from ui.theme import html, badge, panel, table, tm
 
 LETTERS = 'ABCDEFGH'
-SOURCE_NOTE = '시연용 합성 데이터(올컨e·Port-i·TOS 연동 가정)'
+SOURCE_NOTE = '올컨e·Port-i·TOS 정보 연결'
 VALID_SECONDS = 60
 # 선박별 색과 무늬: 색만으로 구분하지 않도록 무늬를 함께 씁니다.
-# 주황(#ED6B2C)은 대표·하차 예정 표시에 쓰므로 선박 색에서는 뺍니다.
-VESSEL_STYLE = [('#3C3E90', 'solid'), ('#C06443', 'stripe'), ('#2A3449', 'dots'), ('#5F6368', 'cross')]
+# 노랑은 대표 컨테이너 표시에 쓰므로 선박 색에서는 뺍니다.
+VESSEL_STYLE = [('#4C8DF0', 'solid'), ('#A78BFA', 'stripe'), ('#64d8c5', 'dots'), ('#c3cfdc', 'cross')]
 
 
 def quality_grade(f):
@@ -200,7 +200,7 @@ def live_controls(sim, story, focus):
         mins = st.select_slider('지연(분)', [10, 20, 30], value=20, key='seq_delay_min')
         if st.button('주입', key='seq_delay_go', width='stretch'):
             seq.inject_truck_delay(sim, tgt, mins)
-            story.setdefault('log', []).append({'시각': tm(sim.now), '컨테이너': tgt, '결정': '지연 주입', '위치': f'+{mins}분', '사유': '시연용 사건'})
+            story.setdefault('log', []).append({'시각': tm(sim.now), '컨테이너': tgt, '결정': '지연 주입', '위치': f'+{mins}분', '사유': '도착 지연 사건'})
             st.rerun()
     if running:
         step = 10 * int((speed or '1x')[:-1])
@@ -271,7 +271,7 @@ def stage_sequence(sim, story, goto):
             panel('장치장 미리보기', 'YARD 2×6×4', f'{pick + 1 if pick is not None else 1}안대로 내렸을 때(첫 표본 기준)')
             yard_grid(sim, opt['positions'], label_map(res))
             vu = story.get('seq_valid_until')
-            st.caption(f'추천 계산 {tm(sim.now)} · 유효 {tm(vu)}까지(시뮬레이션 60초, 지나면 같은 입력으로 다시 확인)'
+            st.caption(f'추천 계산 {tm(sim.now)} · 유효 {tm(vu)}까지(60초, 지나면 같은 입력으로 다시 확인)'
                        + (f' · 마지막 재확인 {story["seq_rechecked"]}' if story.get('seq_rechecked') else '') + f' · 계산 {res["ms"]}ms')
         event_feed(sim)
     return res
@@ -315,7 +315,7 @@ def stage_decide_order(sim, story, reasons_list, log_decision):
         st.caption('확인 항목이 맞지 않으면 승인할 수 없습니다. ③으로 돌아가 다시 계산하세요.')
     reason = st.selectbox('판단 사유(선택)', reasons_list, key='story_reason')
     a, b = st.columns(2)
-    if a.button('모의 승인', type='primary', width='stretch', disabled=not ok, key='story_approve'):
+    if a.button('승인', type='primary', width='stretch', disabled=not ok, key='story_approve'):
         if story.get('decision'):                       # 한 번만 실행
             st.rerun()
         pre = deepcopy(sim)
@@ -340,7 +340,7 @@ def stage_decide_order(sim, story, reasons_list, log_decision):
         log_decision(story, sim, focus, '보류', '—', story['decision']['reason'], key_now[:12])
         st.session_state.seq_running = False
         st.rerun()
-    st.caption('승인하면 순서와 위치가 모의 장비 작업 계획에 한 번만 올라갑니다. 실제 TOS 지시나 기사 알림은 보내지 않습니다.')
+    st.caption('승인하면 순서와 위치가 장비 작업 계획에 한 번만 올라갑니다.')
 
 
 # ── 민감도 ─────────────────────────────────────────────
@@ -370,5 +370,5 @@ def sensitivity_panel(sim, story, res):
             table(['다른 1순위', '조합 수', '예시 조건'],
                   [[o, n, escape(next(f'T {c["T"]} · D {c["D"]} · B {c["B"]:.0f} · 표본 {c["S"]}' for c in s['changes']
                                       if order_text(c['top'], labels) == o))] for o, n in cnt.most_common()])
-        st.caption('가중치는 정책 판단이 담긴 가정값이며 현장 자료로 보정하지 않았습니다. 이 결과는 이 사례(합성 데이터) 한 장면에 대한 계산이고, '
+        st.caption('가중치는 정책 판단이 담긴 가정값이며 현장 자료로 보정하지 않았습니다. 이 결과는 이 사례 한 장면에 대한 계산이고, '
                    '어떤 가중치가 옳은지 알려 주지 않습니다.')

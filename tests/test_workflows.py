@@ -83,24 +83,27 @@ def test_new_ui_flows_eta_approval_driver_and_premarshal():
     at.button(key='nav_eta').click().run()
     cid=next(cid for cid,state in at.session_state['ops'].statuses.items() if state=='EN_ROUTE')
     select(at,'검토 컨테이너').set_value(cid).run()
-    next(c for c in at.checkbox if c.label=='가상 위치정보 사용에 동의').uncheck()
+    next(c for c in at.checkbox if c.label=='위치정보 사용에 동의').uncheck()
     button(at,'ETA 계산·배치 추천에 반영').click().run()
     assert not at.exception
     assert at.session_state['ops'].forecasts[cid].source=='demo_input_fusion'
     assert at.session_state['eta_inputs'][cid]['evidence']['GPS 반영'] is False
-    at.button(key='nav_dashboard').click().run();button(at,'배치 대안 검토').click().run()
+    at.button(key='nav_dashboard').click().run()
+    ops=at.session_state['ops']
+    pending=sorted(ops.yard_arrivals,key=lambda x:(ops.cranes[ops.bundle.containers[x].block] is not None,ops.bundle.containers[x].cargo_type!='일반'))[0]
+    select(at,'검토 컨테이너').set_value(pending).run()
     # Choose an alternative so the training path learns an actual override.
-    choice=next(x for x in at.radio if x.label=='비교할 배치 대안')
+    choice=next(x for x in at.radio if x.label=='배치 대안 선택')
     if len(choice.options)>1:choice.set_value(1).run()
-    button(at,'선택한 배치 모의 승인').click().run()
+    button(at,'선택한 배치 승인').click().run()
     assert not at.exception and at.session_state['guides']
     at.button(key='nav_sharing').click().run()
-    button(at,'기사 확인 모의 처리').click().run()
+    button(at,'기사 확인 처리').click().run()
     assert not at.exception and all(g['ack'] for g in at.session_state['guides'].values())
     at.button(key='nav_premarshal').click().run()
-    button(at,'선작업 시연 시나리오로 처음부터 시작').click().run()
+    button(at,'선작업 검토 시나리오로 처음부터 시작').click().run()
     assert not at.exception
-    button(at,'선작업 모의 승인').click().run()
+    button(at,'선작업 승인').click().run()
     assert not at.exception and at.session_state['page']=='sync'
     button(at,'현재 작업 완료까지 진행').click().run()
     assert at.session_state['ops'].result().metrics['PREMARSH']==1

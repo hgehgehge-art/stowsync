@@ -8,7 +8,7 @@ from services.recommend import recommend_slots
 from services.story import STORY_CONFIG, start_story, build_options, compare_branches, replay_steps, progress_state
 
 APP = Path(__file__).resolve().parents[1] / 'app.py'
-PAGES = ['dashboard', 'eta', 'recommend', 'premarshal', 'exceptions', 'sync', 'sharing', 'impact', 'data', 'story']
+PAGES = ['dashboard', 'eta', 'premarshal', 'exceptions', 'sync', 'sharing', 'impact', 'data', 'story']
 
 
 def button(at, label):
@@ -78,14 +78,14 @@ def test_full_flow_keeps_focus_and_never_double_counts():
     assert at.session_state['page'] == 'story'
     assert len(at.session_state['story_sim'].bundle.containers) == 20 and len(at.session_state['ops'].bundle.containers) == 40
     walk_to_decision(at, focus)
-    approve = button(at, '모의 승인')
+    approve = button(at, '승인')
     approve.click().run()
     sim = at.session_state['story_sim']
     d = at.session_state['story']['decision']
     assert d['kind'] == 'order' and focus in d['order'] and sim.unload_plan == d['plan']
     # 승인 버튼이 다시 눌려도(같은 결정) 계획이 한 번만 올라감
     at.segmented_control[0].set_value('④ 승인·보류').run()
-    assert not any(b.label == '모의 승인' for b in at.button) and at.session_state['story_sim'].unload_plan == d['plan']
+    assert not any(b.label == '승인' for b in at.button) and at.session_state['story_sim'].unload_plan == d['plan']
     at.segmented_control[0].set_value('⑤ 현장 안내·실행').run()
     button(at, '작업 완료까지 진행').click().run()
     sim = at.session_state['story_sim']
@@ -128,16 +128,16 @@ def test_selection_does_not_jump_when_focus_leaves_pending_list():
     at = AppTest.from_file(APP, default_timeout=120).run()
     focus = at.session_state['story']['focus']
     walk_to_decision(at, focus)
-    button(at, '모의 승인').click().run()
+    button(at, '승인').click().run()
     button(at, '작업 완료까지 진행').click().run()
-    at.button(key='nav_recommend').click().run()
+    at.button(key='nav_dashboard').click().run()
     assert not at.exception and at.session_state['story']['focus'] == focus
     # 기능 화면: 승인한 화물이 미적치 목록에서 빠져도 다른 화물로 자동 전환하지 않음
     ops = at.session_state['ops']; f = at.session_state['focus']
-    next(b for b in at.button if b.label == '선택한 배치 모의 승인').click().run()
+    next(b for b in at.button if b.label == '선택한 배치 승인').click().run()
     assert any(v['container_id'] == f for v in at.session_state['ops'].accepted.values())
     next(b for b in at.button if b.label == '현재 작업 완료까지 진행').click().run()
-    at.button(key='nav_recommend').click().run()
+    at.button(key='nav_dashboard').click().run()
     assert not at.exception and at.session_state['focus'] == f
 
 

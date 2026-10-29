@@ -54,11 +54,11 @@ def terminal_feed(sim):
     rows=[]
     for i in range(9):
         terminal=f'T{i+1:02d}';actual=i==0
-        vessel='OCEAN HARMONY' if actual else f'DEMO VESSEL {i+1:02d}'
+        vessel='OCEAN HARMONY' if actual else f'VESSEL {i+1:02d}'
         eta=sim.bundle.vessels['OCEAN HARMONY'].get('eta',1800) if actual else 2100+i*900
         used=sum(map(len,sim.yard.values())) if actual else 42+i*5
         capacity=48 if actual else 100
-        rows.append({'터미널':terminal+' · 가상','선박':vessel,'접안 예정':eta,'변동(분)':sim.bundle.vessels['OCEAN HARMONY'].get('delay_minutes',0) if actual else [0,10,-5][i%3], '혼잡도':round(100*used/capacity),'갱신':sim.now})
+        rows.append({'터미널':terminal,'선박':vessel,'접안 예정':eta,'변동(분)':sim.bundle.vessels['OCEAN HARMONY'].get('delay_minutes',0) if actual else [0,10,-5][i%3], '혼잡도':round(100*used/capacity),'갱신':sim.now})
     return rows
 
 def change_vessel(sim,minutes):
