@@ -48,7 +48,7 @@ def predict_arrival(cid,now,booking,history,gps_consent=False,remaining_minutes=
     adherence=sum(abs(x)<=15 for x in history)/len(history) if history else 0
     trust=round(25+20*min(len(history)/20,1)+15*adherence+(30 if usable else 0)+max(0,10-width/120))
     f=Forecast('INPUT-'+stable_hash([cid,now,booking,history,gps_consent,remaining_minutes if usable else None,traffic if usable else None]),now,cid,max(now,mid-width),mid,mid+width,'demo_input_fusion',max(0,min(100,trust)))
-    return f,{'예약 기준':booking,'이력 보정(분)':round(bias/60,1),'준수율':adherence,'표본 수':len(history),'GPS 반영':usable,'GPS 가중치':weight,'입력 신뢰 점수':f.trust_score,'GPS 제외 사유':'동의 없음' if not gps_consent else '갱신 지연' if gps_age>5 else ''}
+    return f,{'예약 기준':booking,'이력 보정(분)':round(bias/60,1),'준수율':adherence,'표본 수':len(history),'GPS 반영':usable,'GPS 가중치':weight,'입력 품질 점수':f.trust_score,'GPS 제외 사유':'동의 없음' if not gps_consent else '갱신 지연' if gps_age>5 else ''}
 
 def terminal_feed(sim):
     rows=[]

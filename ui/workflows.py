@@ -89,7 +89,7 @@ def arrival_inputs(sim,cid):
         detail=st.session_state.eta_inputs.get(cid,{}).get('evidence')
         if detail:
             table(['반영 항목','현재 계산 근거'],[['예약 기준',tm(detail['예약 기준'])],['기사 이력 보정',f'{detail["이력 보정(분)"]:+.1f}분 · {detail["표본 수"]}건'],['GPS 가중치',f'{detail["GPS 가중치"]:.0%} · {detail["GPS 제외 사유"] or "동의·최신성 확인"}']])
-        with st.expander('신뢰 점수 산식과 이력 확인'):
+        with st.expander('입력 품질 점수 산식과 이력 확인'):
             st.caption('기본 25점 + 이력량 최대 20점 + 준수율 최대 15점 + 유효 GPS 30점 + 예측폭 최대 10점. 검증된 확률이 아닌 입력 품질 점수입니다. 동의하지 않거나 5분을 초과한 위치정보는 계산에서 제외합니다. 적용한 입력은 자동 합성 ETA 갱신보다 우선합니다.')
             st.dataframe({'가상 운행':list(range(1,len(history)+1)),'예약 대비 도착 편차(분)':history},hide_index=True,width='stretch')
 
@@ -104,7 +104,7 @@ def exceptions_page(sim,choose,chart,goto):
     html('<div class="quadrant-grid">'+''.join(cells)+'</div>')
     f=o.forecasts.get(cid)
     if o.statuses[cid]=='EN_ROUTE' and (not f or f.trust_score<o.config.min_eta_trust or o.now-f.observed_at>=o.config.eta_stale):
-        st.warning('ETA 신뢰·최신성 기준 미충족: 선작업을 보류하고 예약 기반 후보와 필수 작업을 우선합니다.')
+        st.warning('ETA 입력 품질·최신성 기준 미충족: 선작업을 보류하고 예약 기반 후보와 필수 작업을 우선합니다.')
     rec=recommend_slots(o,cid)
     panel('현재 상황의 배치 대안','EXPECTED REHANDLING','해당 후보를 선택했을 때 평가 야드 전체에서 발생할 추가 이동의 평균입니다. 소수는 여러 시나리오의 평균을 뜻합니다.')
     table(['후보','예상 재취급','선작업','총 추가 이동','전체 누적 인출 지연'],[[slot(c.stack,c.tier),f'{c.rehandles:.2f}회',f'{c.premarshals:.2f}회',f'{c.rehandles+c.premarshals:.2f}회',f'{c.delay_seconds/60:.1f}분'] for c in rec.candidates[:3]])
@@ -119,14 +119,14 @@ def premarshal_page(sim,chart,reset,goto):
     a,b,c=st.columns(3)
     with a:metric('가용 크레인',sum(j is None for j in sim.cranes.values()),'/ 2','현재 작업을 중단하지 않음','blue')
     with b:metric('추천 상태','검토 가능' if rec else '대기','','도착 대기·ETA·유휴시간 재검증','teal' if rec else 'amber')
-    with c:metric('ETA 신뢰 기준',o.config.min_eta_trust,'%','모의 입력 점수 기준','blue')
+    with c:metric('ETA 입력 품질 기준',o.config.min_eta_trust,'점','규칙 기반 점수 · 확률 아님 · 가정값','blue')
     if not rec:
         st.info('현재 안전하게 앞당길 선작업이 없습니다. 필수 작업·하차 대기·예측 불확실성이 있거나, 이동 비용을 포함한 개선 조건을 충족하지 못했습니다.')
         st.caption('아래 버튼은 지금까지의 진행 상태와 판단 기록을 지우고 선작업 시연 시나리오를 처음부터 시작합니다.')
         if st.button('선작업 시연 시나리오로 처음부터 시작',type='primary',help='현재 운영 상태를 초기화하고 반입 전 유휴시간이 있는 합성 시나리오로 전환합니다.'):
             reset(o.config.model_copy(update={'preset':'premarshal_demo'}));goto('premarshal')
         with st.expander('추천을 보류하는 조건',expanded=True):
-            st.write('크레인 작업 중 / 해당 블록 하차·진입 대기 / ETA 갱신 지연 또는 낮은 신뢰 점수 / 다음 작업까지 이동시간 + 2분 여유 부족 / 총 평가 비용 개선 부족 / 최근 10분 내 같은 화물 이동')
+            st.write('크레인 작업 중 / 해당 블록 하차·진입 대기 / ETA 갱신 지연 또는 낮은 입력 품질 점수(65점 미만) / 다음 작업까지 이동시간 + 2분 여유 부족 / 총 평가 비용 개선 부족 / 최근 10분 내 같은 화물 이동')
         return
     cid=rec.container_id;src=locate(o.yard,cid);options=rec.candidates[:3]
     who=premarshal_beneficiary(o.yard,o.plan,cid)
