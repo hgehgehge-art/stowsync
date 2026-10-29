@@ -209,3 +209,31 @@ CSS = CSS.replace('</style>', '''
 .focus-row{color:#FFD12E!important;}
 .app-table .good{color:#59e0ce;font-weight:600;}.app-table .bad{color:#ee99a4;font-weight:600;}
 </style>''')
+
+# 처리 순서 3분할 화면(대기 리스트 · 장치장 2D 미리보기)
+CSS = CSS.replace('</style>', '''
+.wq-wrap{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px;margin:4px 0 6px}
+.wq{border:1px solid rgba(128,128,128,.35);border-radius:10px;padding:10px 12px;font-size:13px;line-height:1.5}
+.wq.focus{border:2px solid #ED6B2C}
+.wq-head{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.wq-l{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:6px;background:#2A3449;color:#fff;font-weight:700}
+.wq-v{margin-top:4px}.wq-row{display:flex;gap:10px;flex-wrap:wrap;opacity:.85}
+.sw{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:5px;vertical-align:-1px;background:var(--c,#999);border:1px solid rgba(0,0,0,.25)}
+.sw.stripe,.yc.stripe{background:repeating-linear-gradient(45deg,var(--c) 0 4px,#fff 4px 6px)}
+.sw.dots,.yc.dots{background:radial-gradient(#fff 1.4px,var(--c) 1.6px) 0 0/6px 6px}
+.sw.cross,.yc.cross{background:repeating-linear-gradient(0deg,var(--c) 0 4px,#fff 4px 5px),var(--c)}
+.sw.plan{background:transparent;border:2px dashed #ED6B2C}.sw.blk{background:transparent;border:2px solid #D7263D}
+.opt-why{margin:6px 0 2px 16px;padding:0;font-size:12.5px}.opt-why li{margin-bottom:4px}.opt-why span{opacity:.8}
+.opt-nums small{opacity:.7}
+.ygrid{display:flex;gap:16px;flex-wrap:wrap}
+.yb-name{font-weight:700;font-size:13px;margin-bottom:4px}
+.yb-cols{display:flex;gap:4px}
+.ys-cells{display:flex;flex-direction:column;gap:3px}
+.ys-name{font-size:11px;text-align:center;opacity:.75;margin-top:2px}
+.yc{width:36px;height:26px;border-radius:4px;display:grid;place-items:center;font-size:12px;font-weight:700;color:#fff;
+    background:var(--c);text-shadow:0 0 2px #000,0 0 2px #000}
+.yc.empty{background:transparent;border:1px solid rgba(128,128,128,.3)}
+.yc.plan{background:transparent;border:2px dashed var(--c);color:inherit;text-shadow:none}
+.yc.blk{outline:3px solid #D7263D;outline-offset:-1px}
+.ylegend{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;margin-top:8px}
+</style>''')

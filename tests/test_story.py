@@ -81,24 +81,24 @@ def test_full_flow_keeps_focus_and_never_double_counts():
     approve = button(at, '모의 승인')
     approve.click().run()
     sim = at.session_state['story_sim']
-    moves = len(sim.moves); accepted = dict(sim.accepted)
-    assert len(accepted) == 1
-    # 같은 추천을 다시 승인해도 한 번만 실행
-    rec = at.session_state['story']['decision']['rec']
-    assert sim.approve(rec, at.session_state['story']['decision']['index']).valid
-    assert len(sim.moves) == moves and sim.accepted.keys() == accepted.keys()
+    d = at.session_state['story']['decision']
+    assert d['kind'] == 'order' and focus in d['order'] and sim.unload_plan == d['plan']
+    # 승인 버튼이 다시 눌려도(같은 결정) 계획이 한 번만 올라감
+    at.segmented_control[0].set_value('④ 승인·보류').run()
+    assert not any(b.label == '모의 승인' for b in at.button) and at.session_state['story_sim'].unload_plan == d['plan']
+    at.segmented_control[0].set_value('⑤ 현장 안내·실행').run()
     button(at, '작업 완료까지 진행').click().run()
     sim = at.session_state['story_sim']
-    d = at.session_state['story']['decision']
-    assert sim.accepted[d['rec_id']]['status'] == 'COMPLETED'
-    assert locate(sim.yard, focus)[0] == d['stack']                               # 3D·로그·완료 상태 일치
+    initial = [m['container_id'] for m in sim.moves if m['move_type'] == 'INITIAL' and m['container_id'] in d['order']]
+    assert initial == d['order']                                                 # 승인한 순서대로 하차
+    assert locate(sim.yard, focus)[0] == d['stack']                               # 화면·로그·완료 상태 일치
     state = progress_state(at.session_state['story'], sim)
     assert state['작업 완료'] and state['승인 또는 보류'] == 'approve' and not state['결과 확인']
     # 재생은 로그를 읽기만 함: 여러 번 그려도 이동 수 불변
     n = len(sim.moves)
     for _ in range(3):
         steps, _ = replay_steps(sim.bundle, sim.moves, d['at'], sim.now, focus)
-    assert len(sim.moves) == n and steps[0]['move']['container_id'] == focus
+    assert len(sim.moves) == n and any(s['move']['container_id'] == focus for s in steps)
     # 화면 이동·뒤로 가기(URL)로 대표 컨테이너·시각·기록이 초기화되지 않음
     now = sim.now
     feature_focus = at.session_state['focus']
@@ -106,7 +106,7 @@ def test_full_flow_keeps_focus_and_never_double_counts():
         at.button(key='nav_' + page).click().run()
         assert not at.exception, page
         assert at.session_state['story']['focus'] == focus and at.session_state['story_sim'].now == now
-        assert at.session_state['story']['decision']['rec_id'] == d['rec_id']
+        assert at.session_state['story']['decision']['order'] == d['order']
         assert at.session_state['focus'] == feature_focus                       # 기능 시연 쪽 선택도 유지
     at.query_params['page'] = 'eta'
     at.run()
@@ -121,7 +121,7 @@ def test_hold_is_a_separate_branch_not_completion():
     sim = at.session_state['story_sim']; story = at.session_state['story']
     state = progress_state(story, sim)
     assert state['승인 또는 보류'] == 'hold' and not state['작업 완료']
-    assert not sim.accepted and sim.statuses[focus] == 'YARD_QUEUE'
+    assert not sim.accepted and not sim.unload_plan and sim.statuses[focus] == 'YARD_QUEUE'
 
 
 def test_selection_does_not_jump_when_focus_leaves_pending_list():
@@ -173,3 +173,21 @@ def test_overview_picks_focus_first_and_plan_change_keeps_valid_position():
     old = sim.plan[focus].due
     r = apply_plan_change(sim, story, -30)
     assert r['mode'] == 'stored' and r['keep'] and r['new_due'] == old - 1800
+
+
+def test_order_branches_same_event_and_focus_not_rehandled():
+    import services.sequence as seq
+    from services.story import compare_orders
+    sim, story = start_story()
+    focus = story['focus']
+    while sim.statuses[focus] != 'YARD_QUEUE':
+        sim.advance(one_event=True)
+    res = seq.recommend_order(sim, 'A1', {focus: story['planned']})
+    base = [(c, d) for c, d, _ in res['baseline']['positions']]
+    top = [(c, d) for c, d, _ in res['options'][0]['positions']]
+    assert dict(base)[focus] == story['planned'] and res['options'][0]['order'] != res['baseline']['order']
+    cmp = compare_orders(deepcopy(sim), base, top, focus, story['other'])
+    k, c = cmp['keep'], cmp['chosen']
+    assert k['result'].manifest['truth_hash'] == c['result'].manifest['truth_hash']
+    assert k['focus_rehandled'] >= 1 and c['focus_rehandled'] == 0
+    assert c['result'].metrics['extra_moves'] <= k['result'].metrics['extra_moves']   # 결과는 실행 로그 값 그대로

@@ -33,7 +33,7 @@
 ## 진행 중 작업: 처리 순서 추천 + 3분할 화면 + 주황 테마 (요청서 2026-10-29 밤)
 
 - [x] 1단계 로직: `services/sequence.py`(대기 트럭 처리 순서, 순열 ≤5·2단계, 공통 표본, E·T·D 분 단위 차이, 계산 기반 사유, 1위 유지 임계값 30, 민감도 81조합, 지연 주입), 표본 시드 고정(`services/eta.sample_seed`), 대표 사례 데이터 확장(선박 2척: OCEAN HARMONY 입항 전·PACIFIC LINK 작업중, A1 동시 대기 3대), 시뮬레이터 `unload_plan`. 테스트 28개.
-- [ ] 2단계 화면: 대표 사례에 3분할(대기 리스트 / 추천 카드 / 장치장 미리보기), 승인 시 `sim.unload_plan` 실행, 실시간 이벤트(st.fragment run_every) + 지연 주입 버튼, 추천 변경 알림.
+- [x] 2단계 화면: ③을 3분할로 교체(`ui/sequence_view.py`: 위 대기 리스트 A/B/C·선박 상태·ETA 범위·입력 품질 3단계·2×2, 왼쪽 순서 추천 카드 E·T·D 분 차이·표본 범위·야드 전체 재취급·계산 사유·J 접기·첫 하차 위치 후보, 오른쪽 2블록×6스택×4단 미리보기 선박 색+무늬). ④ 순서 승인 → `sim.unload_plan`(입력 버전·60초 유효·특수화물 확인, 한 번만). ⑤ 순서대로 실행, ⑦ `compare_orders`(기준 도착순+계획 위치 vs 승인 순서): 총 추가 이동 8 → 7, 대표 재이동 1 → 0. ▶ 시작/일시정지·1x/5x/10x(1x = 1초에 10초)·지연 주입·사이드바 1순위 변경 기준(J 30)·변경 알림. 테스트 29개.
 - [ ] 3단계 테마: 주황 #ED6B2C·흰색 전체 적용(config.toml + theme.py 토큰), 3D 색 재조정, 대비 4.5:1.
 - [ ] 4단계: 민감도 패널, 시드 20개 다조건 정책 비교 표 보고, 문서 수치 정합성(기획서 초안·README), 기획서 2.3 설명문.
 
@@ -67,7 +67,7 @@
 ```sh
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt pytest
-python -m pytest -q          # 17 passed
+python -m pytest -q          # 29 passed
 python -m streamlit run app.py
 ```
 

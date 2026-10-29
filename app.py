@@ -96,6 +96,9 @@ with st.sidebar:
     for key in PAGES:
         if key=='impact':html('<div class="side-label">INSIGHTS</div>')
         st.button(PAGES[key][0],icon=icons[key],key='nav_'+key,type='primary' if st.session_state.page==key else 'secondary',width='stretch',on_click=navigate,args=(key,))
+    if st.session_state.page=='story':
+        html('<div class="side-label">대표 사례 · 추천 변경 기준</div>')
+        st.slider('1순위를 바꾸는 점수 차이(J)',0,120,30,5,key='seq_margin',help='새 1순위의 점수가 이전 1순위보다 이 값 이상 좋아야 추천을 바꾸고 알림을 띄웁니다. 작은 차이로 추천이 자주 뒤집히지 않게 하는 가정값입니다.')
     html('<div class="side-label">기능 시연 시나리오 · 40개</div>')
     with st.form('scenario_form',border=False):
         preset=st.selectbox('시나리오',list(PRESET_LABELS),format_func=lambda x:PRESET_LABELS[x],index=list(PRESET_LABELS).index(cfg.preset),label_visibility='collapsed')

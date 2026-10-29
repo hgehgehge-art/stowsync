@@ -172,7 +172,7 @@ def progress_state(story, sim):
     d = story.get('decision')
     done_job = False
     if d and d['type'] == 'approve':
-        done_job = sim.accepted.get(d['rec_id'], {}).get('status') == 'COMPLETED'
+        done_job = order_done(sim, d['order']) if d.get('kind') == 'order' else sim.accepted.get(d['rec_id'], {}).get('status') == 'COMPLETED'
     return {'도착 정보 확인': p.get('arrival_checked'), '대안 비교': p.get('compared'),
             '승인 또는 보류': d['type'] if d else None, '작업 완료': done_job,
             '결과 확인': p.get('result_checked')}
@@ -238,3 +238,24 @@ def apply_plan_change(sim, story, minutes=-30):
         result.update({'mode': 'en_route', 'keep': True})
     story['plan_change'] = result
     return result
+
+
+# ── 처리 순서 결정의 두 갈래 비교 ────────────────────────
+def run_order_branch(pre, plan):
+    """결정 직전 상태에서 처리 순서·위치 계획 [(cid, 스택)]을 실행해 끝까지 진행합니다."""
+    s = deepcopy(pre)
+    s.unload_plan = list(plan)
+    s.advance()
+    return s
+
+
+def compare_orders(pre, base_plan, chosen_plan, focus, other):
+    out = {}
+    for name, plan in (('keep', base_plan), ('chosen', chosen_plan)):
+        s = run_order_branch(pre, plan)
+        out[name] = {**focus_outcome(s, focus, other), 'sim': s, 'plan': plan}
+    return out
+
+
+def order_done(sim, order):
+    return all(any(m['container_id'] == c and m['move_type'] == 'INITIAL' and m['completed'] for m in sim.moves) for c in order)
