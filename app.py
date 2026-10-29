@@ -388,7 +388,9 @@ def robustness_panel():
               f'점유율 {" · ".join(f"{x:.0%}" for x in r["occupancy"])} × ETA 오차 {" · ".join(f"{e}분" for e in r["errors_min"])} × 시드 {r["seeds"]}개 = {r["conditions"]}개 합성 조건. 같은 시드(같은 도착 사건)끼리 짝지어 비교했습니다.')
         rows=[]
         for m in r['rows']:
-            d=m['pct'];txt='변화 없음' if abs(d)<.05 else f'{abs(d):.1f}% {"감소" if d<0 else "증가"}'
+            d=m['pct']
+            # 평균 차이가 1% 미만이면 방향을 단정하지 않고, 줄어든·늘어난 조건 수를 함께 씁니다.
+            txt='변화 없음' if abs(d)<.05 else (f'변화 미미(감소 {m["less"]} · 증가 {m["more"]})' if abs(d)<1 else f'{abs(d):.1f}% {"감소" if d<0 else "증가"}')
             rows.append([m['label'],f'{m["a"]:.2f}{m["unit"]}',f'{m["c"]:.2f}{m["unit"]}',f'<b>{txt}</b>',str(m['less']),str(m['same']),str(m['more'])])
         table(['지표(조건 평균)','예약 기반','ETA + 선작업','변화','줄어든 조건','같음','늘어난 조건'],rows)
         st.caption(f'ETA + 선작업 정책은 조건당 평균 {r["premarshal_mean"]:.1f}회의 선작업을 포함합니다. 트럭 대기와 인출 지연은 대체로 줄었지만, 총 추가 이동은 줄어든 조건과 늘어난 조건이 비슷해 '
